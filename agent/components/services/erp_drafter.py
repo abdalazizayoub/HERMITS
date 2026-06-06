@@ -1,6 +1,6 @@
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from components.gemini_client import GeminiClient
@@ -84,11 +84,17 @@ class ERPDrafter:
         # Scrub secrets from commands_summary even if Gemini missed it
         data["commands_summary"] = _scrub_secrets(data.get("commands_summary", ""))
 
-        now = datetime.utcnow()
+        def _ensure_utc(dt: Optional[datetime]) -> datetime:
+            if dt is None:
+                return datetime.now(timezone.utc)
+            if dt.tzinfo is None:
+                return dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc)
+
         activity = Activity(
             ticket_id=ticket.id,
-            start_datetime=start_datetime or now,
-            end_datetime=end_datetime or now,
+            start_datetime=_ensure_utc(start_datetime),
+            end_datetime=_ensure_utc(end_datetime),
             summary=data["summary"],
             root_cause=data["root_cause"],
             actions_taken=data["actions_taken"],

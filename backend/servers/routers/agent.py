@@ -9,6 +9,28 @@ router = APIRouter()
 _sessions: dict[int, dict] = {}
 
 
+def adapt_recon_for_agent(recon: dict) -> dict:
+    def ensure_list(value):
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return value
+        return [value]
+
+    return {
+        "logs": recon.get("journal_err", ""),
+        "service_statuses": recon.get("failed_units", ""),
+        "disk_usage": {
+            "disk": recon.get("disk"),
+            "disk_inodes": recon.get("disk_inodes"),
+        },
+        "processes": recon.get("processes", []),
+        "cron_timers": ensure_list(recon.get("timers")) + ensure_list(recon.get("cron")),
+        "ports": recon.get("ports", []),
+        "raw": recon,
+    }
+
+
 class ReconRequest(BaseModel):
     ticket_id: int
 
@@ -32,12 +54,14 @@ async def run_recon(req: ReconRequest):
         username = system['username']
         key_path = ssh.get_key_path(req.ticket_id)
         recon_results = await ssh.run_recon(host, port, username, key_path)
+        adapted = adapt_recon_for_agent(recon_results)
         _sessions[req.ticket_id] = {
             "host": host,
             "port": port,
             "username": username,
             "key_path": key_path,
             "recon": recon_results,
+            "recon_adapted": adapted,
         }
         audit_logger = audit_mod.get_logger(req.ticket_id)
         audit_logger.log(
@@ -47,7 +71,7 @@ async def run_recon(req: ReconRequest):
             command=f"ssh recon on {host}:{port} as {username}",
             result=f"recon complete, {len(recon_results)} keys collected",
         )
-        return {"recon": recon_results}
+        return {"recon": recon_results, "recon_adapted": adapted}
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
 

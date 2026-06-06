@@ -14,7 +14,7 @@ _SYSTEM_PROMPT_TEMPLATE = """\
 <policy>
 {memory_context}
 </policy>
-You are a senior Linux sysadmin. Analyse the ticket, recon data, pillar baseline results, and past incidents. Generate EXACTLY 3 distinct hypotheses ranked from most to least likely. Each must have a different root cause. Then select the single best hypothesis you are most confident in. Return ONLY valid JSON matching this schema exactly, no markdown:
+You are a senior Linux sysadmin. Analyse the ticket, recon data, pillar baseline results, and past incidents. Generate EXACTLY 3 distinct hypotheses ranked from most to least likely. Each must have a different root cause. Then select the single best hypothesis you are most confident in and set best_hypothesis_index to the index of that chosen hypothesis. Do not randomly choose a hypothesis; choose it based on evidence and confidence. Return ONLY valid JSON matching this schema exactly, no markdown:
 
 {{
   "hypotheses": [

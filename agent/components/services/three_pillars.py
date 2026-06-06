@@ -20,7 +20,7 @@ _SYSTEM_PROMPT_TEMPLATE = """\
 <policy>
 {memory_context}
 </policy>
-You are a senior Linux sysadmin. Given a ticket, generate exactly 3 read-only bash validation commands that define what "fixed" looks like. Return ONLY valid JSON, no markdown, no explanation.
+You are a senior Linux sysadmin. Given a ticket, generate exactly 3 read-only bash validation commands that define what "fixed" looks like. Use the ticket title, description, and service hint to make the commands specific to this incident, and do not return generic hard-coded commands. Return ONLY valid JSON, no markdown, no explanation.
 
 The JSON must match this schema exactly:
 {{
