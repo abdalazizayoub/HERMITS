@@ -25,18 +25,14 @@ async def list_tickets(status="", priority=""):
 async def get_ticket(ticket_id: int):
     if ticket_id <= 0:
         raise ValueError("ticket_id must be a positive integer")
-
-    params = {}
-    response = await _client.get(f"/api/v1/tickets/{ticket_id}", params=params)
+    response = await _client.get(f"/api/v1/tickets/{ticket_id}")
     response.raise_for_status()
     return response.json()
 
 async def get_customer_system(ticket_id: int):
     if ticket_id <= 0:
         raise ValueError("ticket_id must be a positive integer")
-
-    params = {}
-    response = await _client.get(f"/api/v1/tickets/{ticket_id}/customer-system", params=params)
+    response = await _client.get(f"/api/v1/tickets/{ticket_id}/customer-system")
     response.raise_for_status()
     return response.json()
 
@@ -44,19 +40,16 @@ async def patch_ticket_status(ticket_id: int, status: str):
     if ticket_id <= 0:
         raise ValueError("ticket_id must be a positive integer")
 
-    params = {}
-    response = await _client.patch(f"/api/v1/tickets/{ticket_id}/status", json={"status": status}, params=params)
+    response = await _client.patch(f"/api/v1/tickets/{ticket_id}/status", json={"status": status})
     response.raise_for_status()
     return response.json()
 
 async def create_activity(payload: dict):
-    params = {}
-    response = await _client.post("/api/v1/activities/create", json=payload, params=params)
+    response = await _client.post("/api/v1/activities/create", json=payload)
     response.raise_for_status()
     return response.json()
 
 async def reset_me():
-    params = {}
-    response = await _client.post("/api/v1/me/reset", params=params)
+    response = await _client.post("/api/v1/me/reset")
     response.raise_for_status()
     return response.json()

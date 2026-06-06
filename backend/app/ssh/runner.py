@@ -1,9 +1,9 @@
 import asyncio
 import os
 import asyncssh
-from safety import safety_check
+from app.ssh.safety import safety_check
 
-KEY_DIR = "keys"
+KEY_DIR = "/keys"
 DEFAULT_USER = os.environ.get("SSH_USERNAME", "azureuser")
 TIMEOUT = int(os.environ.get("SSH_TIMEOUT", "30"))
 
@@ -24,6 +24,9 @@ async def run_recon(host: str, port: int, username: str, key_path: str) -> dict[
         "timers":       "systemctl list-timers --no-pager",
         "cron":         "cat /etc/crontab",
         "last_logins":  "last -n 10",
+        "service_files": "find /etc/systemd /lib/systemd -name '*.service' 2>/dev/null | xargs grep -l '8080' 2>/dev/null",
+        "opt_files":     "ls /opt/hackathon/ 2>/dev/null",
+        "all_services":  "systemctl list-unit-files --type=service --no-pager | grep -v disabled | head -40",
     }
     results = {}
     try:
