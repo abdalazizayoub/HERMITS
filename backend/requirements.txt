@@ -1,0 +1,6 @@
+fastapi
+uvicorn[standard]
+httpx
+asyncssh
+python-dotenv
+pydantic
