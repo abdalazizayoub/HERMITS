@@ -1,8 +1,11 @@
 import os
 import httpx
 
-BASE_URL = os.getenv("PHOENIX_API_BASE_URL").rstrip("/")
-TOKEN = os.getenv("PHOENIX_API_TOKEN")
+# BASE_URL = os.getenv("PHOENIX_API_BASE_URL").rstrip("/")
+# TOKEN = os.getenv("PHOENIX_API_TOKEN")
+
+BASE_URL = (os.getenv("PHOENIX_API_BASE_URL") or "http://68.210.101.85:8000").rstrip("/")
+TOKEN    = os.getenv("PHOENIX_API_TOKEN") or "test-token"
 
 HEADERS = {
     "Authorization": f"Bearer {TOKEN}",
