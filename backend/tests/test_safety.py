@@ -1,5 +1,5 @@
 import pytest
-from app.ssh.safety import safety_check
+from servers.ssh.safety import safety_check
 
 # ── Hard fails — must be blocked ─────────────────────────────────────────────
 

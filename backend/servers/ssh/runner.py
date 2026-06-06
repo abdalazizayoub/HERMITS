@@ -1,15 +1,18 @@
 import asyncio
 import os
 import asyncssh
-from app.ssh.safety import safety_check
+from ssh.safety import safety_check
 
-KEY_DIR = "/keys"
+ROOT_DIR = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), os.pardir, os.pardir, os.pardir)
+)
+KEY_DIR = os.environ.get("SSH_KEY_DIR", os.path.join(ROOT_DIR, "keys"))
 DEFAULT_USER = os.environ.get("SSH_USERNAME", "azureuser")
 TIMEOUT = int(os.environ.get("SSH_TIMEOUT", "30"))
 
 def get_key_path(ticket_id: int) -> str:
     key_id = ticket_id % 10
-    return f"{KEY_DIR}/case{key_id}_key.pem"
+    return os.path.join(KEY_DIR, f"case{key_id}_key.pem")
 
 async def run_recon(host: str, port: int, username: str, key_path: str) -> dict[str, str]:
     READ_ONLY = {
