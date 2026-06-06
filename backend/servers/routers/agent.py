@@ -1,8 +1,8 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from app.erp import client as erp
-from app.ssh import runner as ssh
-from app.audit import logger as audit_mod
+from erp import client as erp
+from ssh import runner as ssh
+from audit import logger as audit_mod
 
 router = APIRouter()
 

@@ -1,7 +1,7 @@
 import asyncio
 import os
 import asyncssh
-from app.ssh.safety import safety_check
+from ssh.safety import safety_check
 
 KEY_DIR = "/keys"
 DEFAULT_USER = os.environ.get("SSH_USERNAME", "azureuser")

@@ -1,7 +1,7 @@
 import pytest
 import httpx
 import respx
-from app.erp.client import list_tickets, get_ticket, get_customer_system, patch_ticket_status
+from servers.erp.client import list_tickets, get_ticket, get_customer_system, patch_ticket_status
 
 BASE = "http://68.210.101.85:8000"
 

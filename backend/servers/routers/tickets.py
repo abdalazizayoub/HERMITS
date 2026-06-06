@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException
-from app.erp import client as erp
+from erp import client as erp
 import httpx
 
 router = APIRouter()
