@@ -28,12 +28,6 @@ def health():
     return {"status": "ok", "service": "HERMIT API"}
 
 
-# TODO: add your routes. A typical shape (yours may differ):
-#   GET  /api/tickets              -> list tickets (via your Phoenix client)
-#   GET  /api/tickets/{id}         -> ticket + customer system
-#   POST /api/runs                 -> start an agent troubleshooting run
-#   POST /api/runs/{id}/approve    -> run the approved command over SSH
-#   POST /api/runs/{id}/activity   -> submit the activity to the ERP
 
 app.include_router(tickets.router, prefix="/api/tickets", tags=["tickets"])
 app.include_router(agent.router, prefix="/api/agent", tags=["agent"])
