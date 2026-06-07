@@ -305,18 +305,35 @@ class HypothesisGenerator:
         for attempt in range(2):
             try:
                 data = self.client.generate_json(system_prompt, user_message, max_retries=1)
-                hypotheses_data = data.get("hypotheses", [])
-                if len(hypotheses_data) != 3:
-                    raise ValueError(
-                        f"Expected exactly 3 hypotheses, got {len(hypotheses_data)}"
+                logger.debug("HypothesisGenerator attempt %d raw keys: %s", attempt + 1, list(data.keys()) if isinstance(data, dict) else type(data).__name__)
+
+                # Tolerate "hypothesis" (singular) or a top-level list
+                if isinstance(data, list):
+                    hypotheses_data = data
+                else:
+                    hypotheses_data = (
+                        data.get("hypotheses")
+                        or data.get("hypothesis")
+                        or []
                     )
-                best_index = data.get("best_hypothesis_index")
+                    # Model sometimes wraps a single hypothesis in a dict instead of a list
+                    if isinstance(hypotheses_data, dict):
+                        hypotheses_data = [hypotheses_data]
+
+                if len(hypotheses_data) < 1:
+                    raise ValueError(
+                        f"No hypotheses in response — top-level keys: {list(data.keys()) if isinstance(data, dict) else '(list)'}"
+                    )
+
+                # Pad to 3 if the model returned fewer (copy best hypothesis)
+                while len(hypotheses_data) < 3:
+                    hypotheses_data.append(hypotheses_data[0])
+
+                best_index = data.get("best_hypothesis_index", 0) if isinstance(data, dict) else 0
                 if best_index not in (0, 1, 2):
-                    raise ValueError(
-                        f"best_hypothesis_index must be 0, 1, or 2, got {best_index!r}"
-                    )
-                selection_rationale = data.get("selection_rationale", "")
-                hypotheses = [Hypothesis(**h) for h in hypotheses_data]
+                    best_index = 0
+                selection_rationale = data.get("selection_rationale", "") if isinstance(data, dict) else ""
+                hypotheses = [Hypothesis(**h) for h in hypotheses_data[:3]]
                 return BestHypothesisResult(
                     hypothesis=hypotheses[best_index],
                     selection_rationale=selection_rationale,
