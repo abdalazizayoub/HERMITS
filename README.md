@@ -163,3 +163,4 @@ The AI and voice components are mocked in tests, so no API keys are required.
 ## Additional documentation
 
 For deeper AI/agent details and voice features, see `agent/README.md`.
+For a detailed report, visit `Report.md`.
