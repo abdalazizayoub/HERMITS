@@ -92,22 +92,26 @@ class GeminiClient:
                 # Primary: direct parse after stripping fences + fixing escapes
                 cleaned = _fix_json_escapes(self._strip_fences(raw))
                 try:
-                    return json.loads(cleaned)
+                    result = json.loads(cleaned)
+                    logger.debug("generate_json parsed keys=%s", list(result.keys()) if isinstance(result, dict) else type(result).__name__)
+                    return result
                 except json.JSONDecodeError:
                     pass
 
                 # Fallback: scan for first valid JSON object in cleaned text
-                return _extract_first_json_object(cleaned)
+                result = _extract_first_json_object(cleaned)
+                logger.debug("generate_json fallback-parsed keys=%s", list(result.keys()))
+                return result
 
             except json.JSONDecodeError as e:
                 last_error = e
                 logger.warning(
                     "JSON parse failed on attempt %d: %s | raw=%r",
-                    attempt + 1, e, raw[:300],
+                    attempt + 1, e, raw[:500],
                 )
             except Exception as e:
                 last_error = e
-                logger.warning("Gemini call failed on attempt %d: %s", attempt + 1, e)
+                logger.warning("Gemini call failed on attempt %d: %s | raw=%r", attempt + 1, e, raw[:300])
 
         raise GeminiParseError(
             f"Failed to parse Gemini JSON response after {max_retries} attempts: {last_error}"
