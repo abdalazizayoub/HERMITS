@@ -2,7 +2,7 @@
 """
 HERMITS CLI — end-to-end incident response pipeline with interactive command approval.
 
-Run against a live HERMITS server (default: http://localhost:8000).
+Run against a live HERMITS server (default: http://localhost:8080).
 
 Usage:
     python hermits_cli.py <ticket_id>
@@ -400,8 +400,8 @@ def main() -> None:
         epilog=__doc__,
     )
     p.add_argument("ticket_id", type=int, help="Phoenix ERP ticket ID")
-    p.add_argument("--server",     default="http://localhost:8000",
-                   help="HERMITS server base URL (default: http://localhost:8000)")
+    p.add_argument("--server",     default="http://localhost:8080",
+                   help="HERMITS server base URL (default: http://localhost:8080)")
     p.add_argument("--technician", default="cli-user",
                    help="Technician ID recorded in audit log (default: cli-user)")
     p.add_argument("--dry-run", action="store_true",

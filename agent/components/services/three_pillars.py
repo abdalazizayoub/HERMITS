@@ -30,7 +30,8 @@ HARD CONSTRAINTS (violated commands will be rejected):
 - No file writes, no reboots, no kills
 - Each command must complete in under 10 seconds
 
-Good baseline commands: curl -s -o /dev/null -w "%{{http_code}}", systemctl is-active, systemctl is-enabled, ss -tlnp | grep <port>, getent hosts <hostname>, psql -c "SELECT ...", journalctl -n 5 --no-pager
+Good baseline commands: curl --max-time 8 -s -o /dev/null -w "%{{http_code}}", systemctl is-active, systemctl is-enabled, ss -tlnp | grep <port>, getent hosts <hostname>, psql -c "SELECT ...", journalctl -n 5 --no-pager
+IMPORTANT: Every curl command MUST include --max-time 8 to prevent hangs on firewalled ports.
 
 Return ONLY valid JSON, no markdown, no explanation.
 
@@ -55,6 +56,14 @@ class ThreePillarsGenerator:
     def __init__(self, client: GeminiClient | None = None):
         self.client = client or GeminiClient()
 
+    @staticmethod
+    def _enforce_curl_timeout(cmd: str) -> str:
+        if "curl" not in cmd:
+            return cmd
+        if "--max-time" in cmd or "-m " in cmd:
+            return cmd
+        return cmd.replace("curl ", "curl --max-time 8 ", 1)
+
     def _check_safety(self, spec: ThreePillarSpec) -> None:
         for cmd in (spec.service_state_cmd, spec.functional_impact_cmd, spec.durability_cmd):
             if _UNSAFE_PATTERNS.search(cmd):
@@ -75,7 +84,12 @@ class ThreePillarsGenerator:
         for attempt in range(2):
             try:
                 data = self.client.generate_json(system_prompt, user_message, max_retries=1)
-                spec = ThreePillarSpec(**data)
+                spec = ThreePillarSpec(
+                    service_state_cmd=self._enforce_curl_timeout(data["service_state_cmd"]),
+                    functional_impact_cmd=self._enforce_curl_timeout(data["functional_impact_cmd"]),
+                    durability_cmd=self._enforce_curl_timeout(data["durability_cmd"]),
+                    definition_of_done=data["definition_of_done"],
+                )
                 self._check_safety(spec)
                 return spec
             except (GeminiParseError, KeyError, TypeError, ValueError) as e:

@@ -13,19 +13,69 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import uuid
+from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 
+from components.gemini_client import GeminiParseError
 from components.models.pillar import PillarResult
 from api.dependencies import get_agent
 from api.utils import fetch_ticket_from_erp
 
 router = APIRouter()
+logger = logging.getLogger("hermits.ai_agent")
 
-# In-memory store: ticket_id → {"phase1_result": Phase1Result, "pillar_baseline": PillarResult}
+# ── Session persistence ────────────────────────────────────────────────────────
+
+SESSION_DIR = Path("/tmp/hermits_sessions")
+SESSION_DIR.mkdir(exist_ok=True)
+
+
+def _save_phase1(ticket_id: int, entry: dict) -> None:
+    try:
+        saveable = {}
+        for k, v in entry.items():
+            if hasattr(v, "model_dump"):
+                saveable[k] = v.model_dump(mode="json")
+            else:
+                saveable[k] = v
+        (SESSION_DIR / f"phase1_{ticket_id}.json").write_text(
+            json.dumps(saveable, default=str)
+        )
+    except Exception as exc:
+        logger.warning("Failed to persist phase1 for ticket %d: %s", ticket_id, exc)
+
+
+def _load_phase1(ticket_id: int) -> dict | None:
+    try:
+        f = SESSION_DIR / f"phase1_{ticket_id}.json"
+        if not f.exists():
+            return None
+        raw = json.loads(f.read_text())
+        from components.services.runner import Phase1Result
+        from components.models.ticket import Ticket
+        result: dict = {}
+        if "pillar_baseline" in raw and raw["pillar_baseline"]:
+            result["pillar_baseline"] = PillarResult.model_validate(raw["pillar_baseline"])
+        if "ticket" in raw and raw["ticket"]:
+            result["ticket"] = Ticket.model_validate(raw["ticket"])
+        if "phase1_result" in raw and raw["phase1_result"]:
+            try:
+                result["phase1_result"] = Phase1Result.model_validate(raw["phase1_result"])
+            except Exception:
+                result["phase1_result"] = None
+        return result or None
+    except Exception as exc:
+        logger.warning("Failed to load phase1 for ticket %d: %s", ticket_id, exc)
+        return None
+
+
+# ── In-memory store (backed by files above) ────────────────────────────────────
+
 _phase1_store: dict[int, dict] = {}
 
 # SSE job queues: job_id → asyncio.Queue holding the result or exception
@@ -105,11 +155,6 @@ class CompleteRequest(BaseModel):
 
 @router.post("/phase1", summary="Phase 1 — open ticket analysis")
 async def run_phase1(req: Phase1Request):
-    """
-    Called when a technician opens a ticket.
-    Returns the three-pillar validation spec, initial KB matches, and real
-    pillar baseline captured over SSH so the technician can start recon immediately.
-    """
     try:
         from erp.client import get_customer_system
         from ssh.runner import run_pillar_baseline, get_key_path
@@ -118,7 +163,6 @@ async def run_phase1(req: Phase1Request):
         agent = get_agent()
         result = agent.run_ticket_phase1(ticket, req.technician_id, force_refresh=req.force_refresh)
 
-        # Fetch SSH details and capture real pillar baseline (single SSH connection)
         system_data = await get_customer_system(ticket_id=req.ticket_id)
         system = system_data["system"]
         host = system["ip"]
@@ -129,9 +173,10 @@ async def run_phase1(req: Phase1Request):
         spec = result.pillar_spec
         service_state_out = functional_impact_out = durability_out = ""
         if spec:
-            svc, func, dur = await run_pillar_baseline(
-                host, port, username, key_path,
-                spec.service_state_cmd, spec.functional_impact_cmd, spec.durability_cmd,
+            svc, func, dur = await asyncio.gather(
+                run_command(host, port, username, key_path, spec.service_state_cmd),
+                run_command(host, port, username, key_path, spec.functional_impact_cmd),
+                run_command(host, port, username, key_path, spec.durability_cmd),
             )
             service_state_out = svc.get("stdout", "") or svc.get("stderr", "")
             functional_impact_out = func.get("stdout", "") or func.get("stderr", "")
@@ -143,32 +188,35 @@ async def run_phase1(req: Phase1Request):
             durability_output=durability_out,
         )
 
-        _phase1_store[req.ticket_id] = {
+        entry = {
             "phase1_result": result,
             "pillar_baseline": pillar_baseline,
-            "ticket": ticket,  # cached so phase2 never needs to re-fetch from ERP
+            "ticket": ticket,
         }
+        _phase1_store[req.ticket_id] = entry
+        _save_phase1(req.ticket_id, entry)
 
-        return _phase1_to_frontend(result, pillar_baseline)
+        return {**result.model_dump(), "pillar_baseline": pillar_baseline.model_dump()}
+    except GeminiParseError as e:
+        raise HTTPException(status_code=503, detail=f"LLM temporarily unavailable, retry in 10s: {e}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/phase2", summary="Phase 2 — hypothesis generation")
 async def run_phase2(req: Phase2Request):
-    """
-    Called after SSH recon. recon_output and pillar_baseline are optional —
-    if omitted they are pulled from the backend session store and phase1 store
-    respectively. Phase 1 must have been called first for this ticket.
-    """
     stored = _phase1_store.get(req.ticket_id)
     if stored is None:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Phase 1 not run for ticket {req.ticket_id}. Call /phase1 first.",
-        )
+        stored = _load_phase1(req.ticket_id)
+        if stored is not None:
+            _phase1_store[req.ticket_id] = stored  # repopulate memory cache
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Phase 1 not run for ticket {req.ticket_id}. Call /phase1 first.",
+            )
 
-    phase1 = stored["phase1_result"]
+    phase1 = stored.get("phase1_result")
     pillar_baseline = req.pillar_baseline or stored.get("pillar_baseline") or PillarResult(
         service_state_output="",
         functional_impact_output="",
@@ -182,10 +230,18 @@ async def run_phase2(req: Phase2Request):
         if backend_session:
             recon_output = backend_session.get("recon_adapted", {})
         else:
-            recon_output = {}
+            # Try loading from persisted session file
+            try:
+                sf = SESSION_DIR / f"session_{req.ticket_id}.json"
+                if sf.exists():
+                    sess = json.loads(sf.read_text())
+                    recon_output = sess.get("recon_adapted", {})
+                else:
+                    recon_output = {}
+            except Exception:
+                recon_output = {}
 
     try:
-        # Use cached ticket from phase1 — avoids a second ERP round-trip that can fail
         cached_ticket = stored.get("ticket")
         if cached_ticket is not None:
             ticket = cached_ticket
@@ -209,7 +265,6 @@ async def run_phase2(req: Phase2Request):
 # ── SSE streaming helpers ──────────────────────────────────────────────────────
 
 async def _run_phase1_job(job_id: str, req: Phase1Request) -> None:
-    """Run phase1 in a thread and push the result (or error) into the job queue."""
     q = _job_queues.get(job_id)
     if q is None:
         return
@@ -250,10 +305,12 @@ async def _run_phase1_job(job_id: str, req: Phase1Request) -> None:
             durability_output=durability_out,
         )
 
-        _phase1_store[req.ticket_id] = {
+        entry = {
             "phase1_result": result,
             "pillar_baseline": pillar_baseline,
         }
+        _phase1_store[req.ticket_id] = entry
+        _save_phase1(req.ticket_id, entry)
 
         payload = _phase1_to_frontend(result, pillar_baseline)
         await q.put({"ok": True, "data": payload})
@@ -262,23 +319,22 @@ async def _run_phase1_job(job_id: str, req: Phase1Request) -> None:
 
 
 async def _run_phase2_job(job_id: str, req: Phase2Request) -> None:
-    """Run phase2 in a thread and push the result (or error) into the job queue."""
     q = _job_queues.get(job_id)
     if q is None:
         return
     try:
-        stored = _phase1_store.get(req.ticket_id)
+        stored = _phase1_store.get(req.ticket_id) or _load_phase1(req.ticket_id)
         if stored is None:
             await q.put({"ok": False, "error": f"Phase 1 not run for ticket {req.ticket_id}."})
             return
 
-        phase1 = stored["phase1_result"]
+        phase1 = stored.get("phase1_result")
         pillar_baseline = req.pillar_baseline or stored.get("pillar_baseline") or PillarResult(
             service_state_output="", functional_impact_output="", durability_output=""
         )
         recon_output = req.recon_output or {}
 
-        ticket = await fetch_ticket_from_erp(req.ticket_id)
+        ticket = stored.get("ticket") or await fetch_ticket_from_erp(req.ticket_id)
         agent = get_agent()
         result = await asyncio.get_event_loop().run_in_executor(
             None,
@@ -361,15 +417,6 @@ async def stream_phase2_status(job_id: str):
 
 @router.post("/complete", summary="Complete ticket — validate, draft ERP, write KB")
 async def complete_ticket(req: CompleteRequest):
-    """
-    Closes a ticket:
-    1. Validates before/after pillar results.
-    2. Drafts the ERP activity record (secrets scrubbed).
-    3. Writes a new knowledge-base entry for future matching.
-    4. Records technician command decisions for trust calibration.
-
-    Phase 2 must have been called first for this ticket.
-    """
     try:
         stored = _phase1_store.get(req.ticket_id)
         pillar_baseline = stored.get("pillar_baseline") if isinstance(stored, dict) else None
@@ -388,7 +435,15 @@ async def complete_ticket(req: CompleteRequest):
             pillar_baseline=pillar_baseline,
         )
         _phase1_store.pop(req.ticket_id, None)
+        # Clean up persisted session files
+        for fname in [f"phase1_{req.ticket_id}.json", f"session_{req.ticket_id}.json"]:
+            try:
+                (SESSION_DIR / fname).unlink(missing_ok=True)
+            except Exception:
+                pass
         return result
+    except GeminiParseError as e:
+        raise HTTPException(status_code=503, detail=f"LLM temporarily unavailable, retry in 10s: {e}")
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

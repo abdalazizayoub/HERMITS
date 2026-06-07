@@ -68,10 +68,17 @@ Always cross-check for a port mismatch too — both often co-occur.
 Fix: sudo systemctl enable <service> && sudo systemctl restart --no-block <service>
 
 **FILESYSTEM PERMISSION**
-Signal: upload_dirs shows root:root (or wrong owner) but service_users shows a different User=.
-Use the exact User= value from service_users. Use the exact directory from upload_dirs.
+Signal: upload_dirs shows root:root (or wrong owner) on a web/app upload directory but service_users shows a different User=.
+Use the exact User= value from service_users. Use the exact directory path from upload_dirs.
 Fix: sudo chown -R <user>:<user> <exact_path>
 Never use chmod. Never guess the path.
+
+**COLLECTOR WRITE-BLOCKED**
+Signal: collector_detail shows "permission denied", EACCES, or write errors in service logs, AND upload_dirs includes a /var/lib/ entry owned by root instead of the service user in service_users.
+The monitoring/metrics service is running but cannot write data because its data directory is root-owned.
+Use the exact User= from service_users and the exact /var/lib/<dir> path visible in upload_dirs.
+Fix: sudo chown -R <service_user>:<service_user> <data_dir>
+Also check whether the service needs to be restarted after the chown.
 
 **DNS MISSING**
 Signal: hostname from the ticket description is absent from /etc/hosts, or pillar_baseline shows EAI_NONAME.
@@ -244,7 +251,25 @@ class HypothesisGenerator:
             f"service_hint: {service_hint}\n"
             f"priority: {ticket.priority}\n"
             f"</ticket>\n\n"
-            f"<recon>\n{recon_section}\n</recon>\n\n"
+            f"<recon>\n"
+            f"logs: {log_lines}\n"
+            f"service_statuses: {recon_output.get('service_statuses', {})}\n"
+            f"disk_usage: {recon_output.get('disk_usage', {})}\n"
+            f"processes: {recon_output.get('processes', [])[:20]}\n"
+            f"cron_timers: {recon_output.get('cron_timers', [])}\n"
+            f"case_context: {recon_output.get('case_context', 'none found')}\n"
+            f"config_files: {str(recon_output.get('config_files', 'none found'))[:3000]}\n"
+            f"port_config: {str(recon_output.get('port_config', 'none found'))[:1000]}\n"
+            f"service_users: {str(recon_output.get('service_users', 'none found'))[:1000]}\n"
+            f"upload_dirs: {str(recon_output.get('upload_dirs', 'none found'))[:2000]}\n"
+            f"app_source: {str(recon_output.get('app_source', ''))[:3000] or 'none found'}\n"
+            f"network: {str(recon_output.get('network', 'none found'))[:2000]}\n"
+            f"database: {str(recon_output.get('database', 'none found'))[:2000]}\n"
+            f"collector: {recon_output.get('collector', 'none found')}\n"
+            f"service_units: {str(recon_output.get('service_units', 'none found'))[:500]}\n"
+            f"opt_files: {recon_output.get('opt_files', 'none found')}\n"
+            f"collector_detail: {str(recon_output.get('collector_detail', 'none found'))[:3000]}\n"
+            f"</recon>\n\n"
             f"<pillar_baseline>\n"
             f"service_state: → {pillar_baseline.service_state_output}\n"
             f"functional_impact: → {pillar_baseline.functional_impact_output}\n"
@@ -254,7 +279,7 @@ class HypothesisGenerator:
             + (
                 f"\n\n<previous_fix_attempt_failed>\n"
                 f"A previous fix was applied but the system is STILL BROKEN.\n"
-                f"Validation output showing what remains failing:\n{failure_context[:800]}\n"
+                f"Validation output showing what remains failing:\n{failure_context[:5000]}\n"
                 f"Generate NEW hypotheses targeting what the previous fix missed. "
                 f"Do NOT repeat commands that were already tried.\n"
                 f"</previous_fix_attempt_failed>"

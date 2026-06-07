@@ -2,11 +2,12 @@ import json
 import logging
 import os
 import re
+import time
 
 from dotenv import load_dotenv
 from google import genai
-from google.genai import types
 
+load_dotenv()
 load_dotenv()
 
 logger = logging.getLogger("hermits.gemini_client")
@@ -65,7 +66,7 @@ class GeminiClient:
         self,
         system_prompt: str,
         user_message: str,
-        max_retries: int = 2,
+        max_retries: int = 3,
     ) -> dict:
         """
         Call Gemini with JSON output mode enforced, parse and return a dict.
@@ -110,7 +111,7 @@ class GeminiClient:
                 logger.warning("Gemini call failed on attempt %d: %s", attempt + 1, e)
 
         raise GeminiParseError(
-            f"Failed to parse Gemini JSON response after {max_retries} attempts: {last_error}"
+            f"Gemini failed after {max_retries} attempts: {last_error}"
         )
 
     def generate_text(self, system_prompt: str, user_message: str) -> str:

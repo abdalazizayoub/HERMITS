@@ -1,3 +1,7 @@
+import json
+import logging
+from pathlib import Path
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from erp import client as erp
@@ -5,8 +9,45 @@ from ssh import runner as ssh
 from audit import logger as audit_mod
 
 router = APIRouter()
+logger = logging.getLogger("hermits.agent")
+
+SESSION_DIR = Path("/tmp/hermits_sessions")
+SESSION_DIR.mkdir(exist_ok=True)
 
 _sessions: dict[int, dict] = {}
+
+
+def _save_session(ticket_id: int, session: dict) -> None:
+    try:
+        saveable = {
+            "host": session["host"],
+            "port": session["port"],
+            "username": session["username"],
+            "key_path": session["key_path"],
+            "recon_adapted": session.get("recon_adapted", {}),
+        }
+        (SESSION_DIR / f"session_{ticket_id}.json").write_text(json.dumps(saveable))
+    except Exception as exc:
+        logger.warning("Failed to persist session for ticket %d: %s", ticket_id, exc)
+
+
+def _load_session(ticket_id: int) -> dict | None:
+    try:
+        f = SESSION_DIR / f"session_{ticket_id}.json"
+        if not f.exists():
+            return None
+        data = json.loads(f.read_text())
+        return {
+            "host": data["host"],
+            "port": data["port"],
+            "username": data["username"],
+            "key_path": data["key_path"],
+            "recon": {},
+            "recon_adapted": data.get("recon_adapted", {}),
+        }
+    except Exception as exc:
+        logger.warning("Failed to load session for ticket %d: %s", ticket_id, exc)
+        return None
 
 
 def adapt_recon_for_agent(recon: dict) -> dict:
@@ -25,6 +66,7 @@ def adapt_recon_for_agent(recon: dict) -> dict:
             "disk_inodes": recon.get("disk_inodes"),
         },
         "processes": recon.get("processes", []),
+        "service_logs": recon.get("service_logs_metrics", "") + "\n" + recon.get("journal_err", ""),
         "cron_timers": ensure_list(recon.get("timers")) + ensure_list(recon.get("cron")),
         "ports": recon.get("ports", []),
         "config_files": (
@@ -35,9 +77,10 @@ def adapt_recon_for_agent(recon: dict) -> dict:
         ),
         "port_config": recon.get("listening_ports", "") + "\n" + recon.get("port_mismatch", ""),
         "service_units": recon.get("service_env_files", ""),
-        "upload_dirs": recon.get("upload_dirs", ""),
+        "upload_dirs": recon.get("upload_dirs", "") + "\n" + recon.get("var_lib_perms", ""),
         "service_users": recon.get("service_users", ""),
         "app_source": recon.get("app_source", "") + "\n" + recon.get("upload_config", ""),
+        "case_context": recon.get("case_json", "") + "\n" + recon.get("public_test", ""),
         "network": (
             recon.get("hosts_file", "") + "\n" +
             recon.get("dns_resolution", "") + "\n" +
@@ -50,7 +93,8 @@ def adapt_recon_for_agent(recon: dict) -> dict:
             recon.get("pg_databases", "")
         ),
         "collector": recon.get("collector_status", ""),
-        "collector_detail": recon.get("collector_detail", ""),
+        "collector_detail": recon.get("collector_detail", "") + "\n" + recon.get("collector_logs", ""),
+        "opt_files": recon.get("opt_files", ""),
         "raw": recon,
     }
 
@@ -105,6 +149,7 @@ async def run_recon(req: ReconRequest):
     adapted = adapt_recon_for_agent(recon_results)
     _sessions[req.ticket_id]["recon"]         = recon_results
     _sessions[req.ticket_id]["recon_adapted"] = adapted
+    _save_session(req.ticket_id, _sessions[req.ticket_id])
 
     ssh_ok = "error" not in recon_results
     try:
@@ -126,7 +171,11 @@ async def run_recon(req: ReconRequest):
 async def execute_command(req: ExecuteRequest):
     session = _sessions.get(req.ticket_id)
     if not session:
-        raise HTTPException(status_code=400, detail="Session not found — run recon first")
+        session = _load_session(req.ticket_id)
+        if session:
+            _sessions[req.ticket_id] = session
+        else:
+            raise HTTPException(status_code=400, detail="Session not found — run recon first")
     audit_logger = audit_mod.get_logger(req.ticket_id)
     try:
         audit_logger.log(
@@ -197,7 +246,11 @@ async def execute_command(req: ExecuteRequest):
 async def validate(req: ValidateRequest):
     session = _sessions.get(req.ticket_id)
     if not session:
-        raise HTTPException(status_code=400, detail="Session not found")
+        session = _load_session(req.ticket_id)
+        if session:
+            _sessions[req.ticket_id] = session
+        else:
+            raise HTTPException(status_code=400, detail="Session not found")
     audit_logger = audit_mod.get_logger(req.ticket_id)
     result = await ssh.run_validation(
         host=session["host"],
@@ -221,6 +274,10 @@ async def reset_session(req: ResetSessionRequest):
     """Clear the in-memory session for a ticket (useful for tests/dev)."""
     if req.ticket_id in _sessions:
         _sessions.pop(req.ticket_id, None)
+        try:
+            (SESSION_DIR / f"session_{req.ticket_id}.json").unlink(missing_ok=True)
+        except Exception:
+            pass
         audit_mod.get_logger(req.ticket_id).log(
             actor="human",
             category="session",
