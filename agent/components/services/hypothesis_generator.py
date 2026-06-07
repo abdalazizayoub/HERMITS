@@ -15,6 +15,10 @@ _SYSTEM_PROMPT_TEMPLATE = """\
 {memory_context}
 </policy>
 You are a senior Linux sysadmin. Analyse the ticket, recon data, pillar baseline results, and past incidents. Generate EXACTLY 3 distinct hypotheses ranked from most to least likely. Each must have a different root cause. Then select the single best hypothesis you are most confident in and set best_hypothesis_index to the index of that chosen hypothesis. Do not randomly choose a hypothesis; choose it based on evidence and confidence. Return ONLY valid JSON matching this schema exactly, no markdown:
+- Always check config_files and port_config in the recon output for mismatches between configured ports and expected ports mentioned in the ticket.
+- If a service is running but on the wrong port, the fix is editing the environment/config file — NOT restarting or enabling the service.
+- If an EnvironmentFile is referenced in a systemd service, always read its contents and check for misconfigured values.
+- For any ticket mentioning a specific URL or port, verify that port appears in port_config. If it doesn't but a nearby port does, that is almost certainly a port misconfiguration.
 
 {{
   "hypotheses": [
@@ -78,6 +82,12 @@ class HypothesisGenerator:
             f"disk_usage: {recon_output.get('disk_usage', {})}\n"
             f"processes: {recon_output.get('processes', [])[:20]}\n"
             f"cron_timers: {recon_output.get('cron_timers', [])}\n"
+            f"config_files: {recon_output.get('config_files', 'none found')}\n"
+            f"port_config: {recon_output.get('port_config', 'none found')}\n"
+            f"upload_dirs: {recon_output.get('upload_dirs', 'none found')}\n"
+            f"network: {recon_output.get('network', 'none found')}\n"
+            f"database: {recon_output.get('database', 'none found')}\n"
+            f"collector: {recon_output.get('collector', 'none found')}\n"
             f"</recon>\n\n"
             f"<pillar_baseline>\n"
             f"service_state: → {pillar_baseline.service_state_output}\n"

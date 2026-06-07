@@ -27,6 +27,26 @@ def adapt_recon_for_agent(recon: dict) -> dict:
         "processes": recon.get("processes", []),
         "cron_timers": ensure_list(recon.get("timers")) + ensure_list(recon.get("cron")),
         "ports": recon.get("ports", []),
+        "config_files": (
+            recon.get("env_contents", "") + "\n" +
+            recon.get("app_configs", "") + "\n" +
+            recon.get("service_env_files", "")
+        ),
+        "port_config": recon.get("listening_ports", "") + "\n" + recon.get("port_mismatch", ""),
+        "service_units": recon.get("service_env_files", ""),
+        "upload_dirs": recon.get("upload_dirs", ""),
+        "service_users": recon.get("service_users", ""),
+        "network": (
+            recon.get("hosts_file", "") + "\n" +
+            recon.get("dns_resolution", "") + "\n" +
+            recon.get("firewall", "")
+        ),
+        "database": (
+            recon.get("pg_users", "") + "\n" +
+            recon.get("pg_tables", "") + "\n" +
+            recon.get("pg_grants", "")
+        ),
+        "collector": recon.get("collector_status", ""),
         "raw": recon,
     }
 

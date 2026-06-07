@@ -17,10 +17,14 @@ _SYSTEM_PROMPT = """\
 </policy>
 You are a senior Linux sysadmin writing an ERP incident activity report. Produce ALL five required fields in JSON. Be precise and technical. IMPORTANT: the commands_summary field must NEVER contain output values, secrets, passwords, tokens, keys, credentials, or base64 strings longer than 20 characters. Scrub any string matching password, token, key, secret, private, credential, or long base64 from commands_summary before including it. Return ONLY valid JSON, no markdown.
 
+root_cause must be the specific technical configuration error, not the symptom.
+BAD: "The status API was not available"
+GOOD: "PORT=8008 in /etc/customer-status.env caused the service to bind to the wrong port; the service was also not enabled for automatic startup"
+
 JSON schema:
 {{
   "summary": "one concise sentence of what happened and what was done",
-  "root_cause": "specific technical root cause — not the symptom",
+  "root_cause": "the misconfigured file, value, or missing setting — not the user-facing symptom",
   "actions_taken": "numbered list of diagnosis steps then fix steps in chronological order",
   "commands_summary": "list of commands run — NO output, NO secrets, NO passwords, NO tokens, NO private keys",
   "validation_result": "concrete proof — quote pillar outputs showing PASS, state what was verified"

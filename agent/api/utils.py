@@ -11,7 +11,7 @@ async def fetch_ticket_from_erp(ticket_id: int):
     Fetches ticket data + customer-system SSH details from the Phoenix ERP,
     then assembles and returns a components.models.ticket.Ticket instance.
     """
-    from app.erp import client as erp  # backend/ must be on sys.path
+    from erp import client as erp  # backend/ must be on sys.path
     from components.models.ticket import Ticket  # agent/ must be on sys.path
 
     ticket_data: dict = await erp.get_ticket(ticket_id)

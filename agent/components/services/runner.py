@@ -157,6 +157,7 @@ class HermitsAgent:
         technician_notes: str,
         resolution_time_minutes: int,
         command_decisions: list[tuple[str, bool]],
+        pillar_baseline: Optional[PillarResult] = None,
     ) -> CompletionResult:
         run_result = self._run_results.get(ticket.id)
         if run_result is None:
@@ -167,7 +168,7 @@ class HermitsAgent:
         pillar_spec = run_result.pillar_spec
         chosen_hypothesis = run_result.best_hypothesis.hypothesis
 
-        baseline = PillarResult(
+        baseline = pillar_baseline or PillarResult(
             service_state_output="(baseline captured at run_ticket)",
             functional_impact_output="(baseline captured at run_ticket)",
             durability_output="(baseline captured at run_ticket)",
