@@ -97,11 +97,18 @@ Fix: sudo systemctl enable --now <service_name>
 
 Rules (a partial fix scores zero):
 1. Quote exact values from recon — if a path, username, port, or role is not in the recon, add a read-only diagnostic command first before the fix
-2. Service fixes must follow this exact order: daemon-reload → enable → restart --no-block
+2. ORDERING — config file changes MUST happen before service restart. The mandatory order is:
+   a. [optional] diagnostic read command if path/value is unknown
+   b. the file edit (sed, tee, etc.) using the exact path
+   c. sudo systemctl daemon-reload
+   d. sudo systemctl enable <service>
+   e. sudo systemctl restart --no-block <service>
+   NEVER restart the service before the config is fixed. NEVER put the sed/edit step after the restart.
 3. Database fixes must include BOTH table grant AND sequence grant
 4. The final step in fix_steps must always be:
    {{"command": "sudo /opt/hackathon/public-test.sh", "rationale": "Validates the fix with the official grader", "risk_level": "low"}}
 5. Every state-modifying command requires sudo
+6. NEVER use placeholder tokens like <CONFIG_FILE_PATH> in commands. If the exact path is unknown, run a diagnostic grep first to find it, then hard-code the actual path returned by that grep in the next command using shell command substitution: sudo sed -i '...' $(find /etc /opt -name '*.env' | xargs grep -l 'PORT=8008' | head -1)
 
 Missing evidence → add a diagnostic read step first:
 - Unknown upload path: {{"command": "find /opt /srv /var/www -name '*.py' 2>/dev/null | xargs grep -in 'upload\\\\|path\\\\|folder\\\\|dir' 2>/dev/null | head -20", "rationale": "Find exact upload path from source", "risk_level": "low"}}

@@ -208,6 +208,19 @@ def run(ticket_id: int, server: str, technician: str, dry_run: bool) -> None:
     passed     = False
     val_output = ""
 
+    def _build_failure_context(executed: list[dict], validation_out: str) -> str:
+        lines = ["Validation script output:", validation_out[:800], "",
+                 "Commands already executed in previous attempt(s) — do NOT repeat these:"]
+        for i, s in enumerate(executed, 1):
+            ec = s.get("exit_code")
+            lines.append(f"  [{i}] cmd: {s.get('command','')}")
+            lines.append(f"       exit={ec}")
+            if s.get("stdout"): lines.append(f"       stdout: {s['stdout'][:200]}")
+            if s.get("stderr"): lines.append(f"       stderr: {s['stderr'][:150]}")
+        lines.append("")
+        lines.append("Generate a NEW plan that addresses what the previous attempt missed or got wrong.")
+        return "\n".join(lines)
+
     for attempt in range(MAX_REPAIR + 1):
         if attempt > 0:
             _banner(f"REPAIR {attempt}/{MAX_REPAIR} — Re-generating hypothesis")
@@ -215,7 +228,7 @@ def run(ticket_id: int, server: str, technician: str, dry_run: bool) -> None:
             phase2 = post(client, f"{base}/api/agent/ai/phase2", {
                 "ticket_id":      ticket_id,
                 "technician_id":  technician,
-                "failure_context": val_output,
+                "failure_context": _build_failure_context(executed_steps, val_output),
             }, timeout=120.0)
             best      = phase2.get("best_hypothesis", {})
             hyp       = best.get("hypothesis", {})
