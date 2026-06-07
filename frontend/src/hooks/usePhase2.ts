@@ -4,7 +4,7 @@ import { useWorkbenchStore } from '../store/workbenchStore'
 import type { Phase1Result, Phase2Result, ReconOutput } from '../types/agent'
 
 export function usePhase2() {
-  const { setPhase2Result, setError, setMode, writeToTerminal, phase1Result } = useWorkbenchStore()
+  const { setPhase2Result, setError, setMode, writeToTerminal } = useWorkbenchStore()
 
   const run = useCallback(async (
     ticketId: number,
@@ -59,7 +59,7 @@ export function usePhase2() {
         writeToTerminal(`\x1b[31m[ERROR] Phase 2 failed: ${msg}\x1b[0m\r\n`, 'error')
       }
     }
-  }, [setPhase2Result, setError, setMode, writeToTerminal, phase1Result])
+  }, [setPhase2Result, setError, setMode, writeToTerminal])
 
   return { run }
 }

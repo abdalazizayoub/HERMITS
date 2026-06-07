@@ -76,11 +76,14 @@ async def run_recon(req: ReconRequest):
     # Step 1: fetch SSH details from ERP — this MUST succeed.
     try:
         system_data = await erp.get_customer_system(ticket_id=req.ticket_id)
+        ticket_data = await erp.get_ticket(ticket_id=req.ticket_id)
         system   = system_data["system"]
         host     = system["ip"]
         port     = system.get("port", 22)
         username = system["username"]
         key_path = ssh.get_key_path(req.ticket_id)
+        service_hint = ticket_data.get("service_hint", "") or ""
+        ticket_text = f"{ticket_data.get('title','')} {ticket_data.get('description','')}"
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"ERP unavailable: {repr(e)}")
 
@@ -91,7 +94,14 @@ async def run_recon(req: ReconRequest):
     }
 
     # Step 3: run SSH recon — returns a dict, handles its own failures, never raises.
-    recon_results = await ssh.run_recon(host, port, username, key_path)
+    recon_results = await ssh.run_recon(
+        host,
+        port,
+        username,
+        key_path,
+        service_hint=service_hint,
+        ticket_text=ticket_text,
+    )
     adapted = adapt_recon_for_agent(recon_results)
     _sessions[req.ticket_id]["recon"]         = recon_results
     _sessions[req.ticket_id]["recon_adapted"] = adapted

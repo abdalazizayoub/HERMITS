@@ -32,11 +32,54 @@ _phase1_store: dict[int, dict] = {}
 _job_queues: dict[str, asyncio.Queue] = {}
 
 
+# ── Frontend-schema transformers ───────────────────────────────────────────────
+
+def _kb_match_to_frontend(m) -> dict:
+    """Flatten nested KBMatch/KBEntry into the shape the frontend KBMatch type expects."""
+    e = m.entry
+    return {
+        "entry_id": e.id,
+        "similarity_score": m.similarity_score,
+        "confidence_boost": m.confidence_boost,
+        "root_cause": e.root_cause,
+        "fix_commands": e.fix_commands,
+        "resolution_time_minutes": e.resolution_time_minutes,
+        "service_hint": (e.ticket_fingerprint.service_hint if e.ticket_fingerprint else None),
+        "validation_passed": e.validation_passed,
+    }
+
+
+def _phase1_to_frontend(result, pillar_baseline) -> dict:
+    """Map backend Phase1Result + PillarResult → shape the frontend Phase1Result type expects."""
+    return {
+        "pillar_spec": result.pillar_spec.model_dump() if result.pillar_spec else None,
+        "kb_matches": [_kb_match_to_frontend(m) for m in result.kb_matches_initial],
+        "memory_context": result.memory_context,
+        "cache_hit": result.cache_hit,
+        "pillar_baseline": pillar_baseline.model_dump() if pillar_baseline else None,
+    }
+
+
+def _phase2_to_frontend(result) -> dict:
+    """Map backend AgentRunResult → shape the frontend Phase2Result type expects."""
+    return {
+        "hypothesis": result.best_hypothesis.hypothesis.model_dump(),
+        "safety_results": [
+            {"is_safe": s.safe, "reason": s.reason, "warnings": []}
+            for s in result.safety_checks
+        ],
+        "pillar_spec": result.pillar_spec.model_dump() if result.pillar_spec else None,
+        "recon_summary": result.best_hypothesis.selection_rationale or "",
+        "all_hypotheses": [],
+    }
+
+
 # ── Request models ─────────────────────────────────────────────────────────────
 
 class Phase1Request(BaseModel):
     ticket_id: int
     technician_id: str = "default"
+    force_refresh: bool = False  # re-analyze: skip prewarm cache, generate fresh
 
 
 class Phase2Request(BaseModel):
@@ -69,13 +112,13 @@ async def run_phase1(req: Phase1Request):
     """
     try:
         from erp.client import get_customer_system
-        from ssh.runner import run_command, get_key_path
+        from ssh.runner import run_pillar_baseline, get_key_path
 
         ticket = await fetch_ticket_from_erp(req.ticket_id)
         agent = get_agent()
-        result = agent.run_ticket_phase1(ticket, req.technician_id)
+        result = agent.run_ticket_phase1(ticket, req.technician_id, force_refresh=req.force_refresh)
 
-        # Fetch SSH details and capture real pillar baseline
+        # Fetch SSH details and capture real pillar baseline (single SSH connection)
         system_data = await get_customer_system(ticket_id=req.ticket_id)
         system = system_data["system"]
         host = system["ip"]
@@ -86,11 +129,9 @@ async def run_phase1(req: Phase1Request):
         spec = result.pillar_spec
         service_state_out = functional_impact_out = durability_out = ""
         if spec:
-            import asyncio
-            svc, func, dur = await asyncio.gather(
-                run_command(host, port, username, key_path, spec.service_state_cmd),
-                run_command(host, port, username, key_path, spec.functional_impact_cmd),
-                run_command(host, port, username, key_path, spec.durability_cmd),
+            svc, func, dur = await run_pillar_baseline(
+                host, port, username, key_path,
+                spec.service_state_cmd, spec.functional_impact_cmd, spec.durability_cmd,
             )
             service_state_out = svc.get("stdout", "") or svc.get("stderr", "")
             functional_impact_out = func.get("stdout", "") or func.get("stderr", "")
@@ -108,7 +149,7 @@ async def run_phase1(req: Phase1Request):
             "ticket": ticket,  # cached so phase2 never needs to re-fetch from ERP
         }
 
-        return {**result.model_dump(), "pillar_baseline": pillar_baseline.model_dump()}
+        return _phase1_to_frontend(result, pillar_baseline)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -160,7 +201,7 @@ async def run_phase2(req: Phase2Request):
             phase1_result=phase1,
             failure_context=req.failure_context or "",
         )
-        return result
+        return _phase2_to_frontend(result)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -174,15 +215,18 @@ async def _run_phase1_job(job_id: str, req: Phase1Request) -> None:
         return
     try:
         from erp.client import get_customer_system
-        from ssh.runner import run_command, get_key_path
+        from ssh.runner import run_pillar_baseline, get_key_path
 
-        ticket = await fetch_ticket_from_erp(req.ticket_id)
+        # Fetch ticket and SSH system info in parallel — both are network calls
+        ticket, system_data = await asyncio.gather(
+            fetch_ticket_from_erp(req.ticket_id),
+            get_customer_system(ticket_id=req.ticket_id),
+        )
         agent = get_agent()
         result = await asyncio.get_event_loop().run_in_executor(
-            None, lambda: agent.run_ticket_phase1(ticket, req.technician_id)
+            None, lambda: agent.run_ticket_phase1(ticket, req.technician_id, force_refresh=req.force_refresh)
         )
 
-        system_data = await get_customer_system(ticket_id=req.ticket_id)
         system = system_data["system"]
         host = system["ip"]
         port = system.get("port", 22)
@@ -192,9 +236,10 @@ async def _run_phase1_job(job_id: str, req: Phase1Request) -> None:
         spec = result.pillar_spec
         service_state_out = functional_impact_out = durability_out = ""
         if spec:
-            svc = await run_command(host, port, username, key_path, spec.service_state_cmd)
-            func = await run_command(host, port, username, key_path, spec.functional_impact_cmd)
-            dur = await run_command(host, port, username, key_path, spec.durability_cmd)
+            svc, func, dur = await run_pillar_baseline(
+                host, port, username, key_path,
+                spec.service_state_cmd, spec.functional_impact_cmd, spec.durability_cmd,
+            )
             service_state_out = svc.get("stdout", "") or svc.get("stderr", "")
             functional_impact_out = func.get("stdout", "") or func.get("stderr", "")
             durability_out = dur.get("stdout", "") or dur.get("stderr", "")
@@ -210,7 +255,7 @@ async def _run_phase1_job(job_id: str, req: Phase1Request) -> None:
             "pillar_baseline": pillar_baseline,
         }
 
-        payload = {**result.model_dump(), "pillar_baseline": pillar_baseline.model_dump()}
+        payload = _phase1_to_frontend(result, pillar_baseline)
         await q.put({"ok": True, "data": payload})
     except Exception as e:
         await q.put({"ok": False, "error": str(e)})
@@ -245,7 +290,7 @@ async def _run_phase2_job(job_id: str, req: Phase2Request) -> None:
                 phase1_result=phase1,
             ),
         )
-        await q.put({"ok": True, "data": result})
+        await q.put({"ok": True, "data": _phase2_to_frontend(result)})
     except Exception as e:
         await q.put({"ok": False, "error": str(e)})
 
@@ -272,9 +317,9 @@ async def stream_phase1_status(job_id: str):
         _job_queues.pop(job_id, None)
         if payload["ok"]:
             data = payload["data"]
-            if hasattr(data, "dict"):
+            if hasattr(data, "model_dump"):
                 data = data.model_dump()
-            yield {"event": "done", "data": json.dumps({"status": "done", "data": data})}
+            yield {"event": "done", "data": json.dumps({"status": "done", "data": data}, default=str)}
         else:
             yield {"event": "error", "data": json.dumps({"status": "error", "message": payload["error"]})}
 
@@ -303,9 +348,9 @@ async def stream_phase2_status(job_id: str):
         _job_queues.pop(job_id, None)
         if payload["ok"]:
             data = payload["data"]
-            if hasattr(data, "dict"):
+            if hasattr(data, "model_dump"):
                 data = data.model_dump()
-            yield {"event": "done", "data": json.dumps({"status": "done", "data": data})}
+            yield {"event": "done", "data": json.dumps({"status": "done", "data": data}, default=str)}
         else:
             yield {"event": "error", "data": json.dumps({"status": "error", "message": payload["error"]})}
 

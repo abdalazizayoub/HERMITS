@@ -6,9 +6,9 @@ interface SortControlsProps {
 }
 
 const OPTIONS: { key: SortKey; label: string }[] = [
+  { key: 'priority', label: 'Priority' },
   { key: 'date', label: 'Date' },
   { key: 'customer', label: 'Customer' },
-  { key: 'priority', label: 'Priority' },
 ]
 
 export default function SortControls({ sortBy, onChange }: SortControlsProps) {
@@ -18,10 +18,10 @@ export default function SortControls({ sortBy, onChange }: SortControlsProps) {
         <button
           key={key}
           onClick={() => onChange(key)}
-          className={`px-2 py-1 text-xs rounded transition-colors ${
+          className={`px-2 py-1 text-xs rounded transition-all font-medium ${
             sortBy === key
-              ? 'bg-blue-600 text-white'
-              : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-slate-200'
+              ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/40'
+              : 'bg-slate-800/60 text-slate-500 hover:bg-slate-700/60 hover:text-slate-300 border border-transparent'
           }`}
         >
           {label}

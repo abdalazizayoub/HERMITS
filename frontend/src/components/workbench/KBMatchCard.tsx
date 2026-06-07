@@ -1,39 +1,53 @@
 import type { KBMatch } from '../../types/kb'
-import { CheckCircle, XCircle, Clock } from 'lucide-react'
+import { CheckCircle2, XCircle, Clock, BookOpen } from 'lucide-react'
 
 export default function KBMatchCard({ match, index }: { match: KBMatch; index: number }) {
   const pct = Math.round(match.similarity_score * 100)
+  const isHighMatch = pct >= 70
 
   return (
-    <div className="rounded-lg border border-slate-700 bg-slate-900 p-3 space-y-2">
+    <div className={`rounded-lg border p-3 space-y-2 ${isHighMatch ? 'border-purple-500/30 bg-purple-950/15' : 'border-slate-800 bg-slate-900/50'}`}>
       <div className="flex items-center justify-between">
-        <span className="text-xs font-semibold text-slate-400">KB Match #{index + 1}</span>
+        <div className="flex items-center gap-1.5">
+          <BookOpen size={10} className={isHighMatch ? 'text-purple-500' : 'text-slate-600'} />
+          <span className="text-xs font-semibold text-slate-500">KB #{index + 1}</span>
+        </div>
         <div className="flex items-center gap-2">
-          <span className="text-xs font-mono text-blue-400">{pct}% similar</span>
+          <div className="flex items-center gap-1">
+            <div className="w-12 h-1 rounded-full bg-slate-800 overflow-hidden">
+              <div
+                className={`h-full rounded-full ${isHighMatch ? 'bg-purple-500' : 'bg-slate-600'}`}
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+            <span className={`text-xs font-mono font-bold ${isHighMatch ? 'text-purple-400' : 'text-slate-500'}`}>{pct}%</span>
+          </div>
           {match.validation_passed ? (
-            <CheckCircle size={12} className="text-emerald-400" />
+            <CheckCircle2 size={11} className="text-emerald-400" />
           ) : (
-            <XCircle size={12} className="text-red-400" />
+            <XCircle size={11} className="text-red-500" />
           )}
         </div>
       </div>
 
-      <p className="text-sm text-slate-200">{match.root_cause}</p>
+      <p className="text-xs text-slate-300 leading-relaxed">{match.root_cause}</p>
 
       {match.fix_commands.length > 0 && (
         <div className="space-y-1">
-          {match.fix_commands.slice(0, 3).map((cmd, i) => (
-            <code key={i} className="block text-xs font-mono bg-slate-800 text-emerald-300 px-2 py-1 rounded">
+          {match.fix_commands.slice(0, 2).map((cmd, i) => (
+            <code key={i} className="block text-xs font-mono bg-slate-950 text-emerald-500 px-2 py-1 rounded border border-slate-800/60">
               {cmd}
             </code>
           ))}
         </div>
       )}
 
-      <div className="flex items-center gap-1 text-xs text-slate-500">
-        <Clock size={10} />
-        Resolved in {match.resolution_time_minutes} min
-        {match.service_hint && <span className="ml-2 font-mono">[{match.service_hint}]</span>}
+      <div className="flex items-center gap-3 text-xs text-slate-600">
+        <span className="flex items-center gap-1">
+          <Clock size={9} />
+          {match.resolution_time_minutes} min
+        </span>
+        {match.service_hint && <span className="font-mono">[{match.service_hint}]</span>}
       </div>
     </div>
   )

@@ -1,24 +1,24 @@
 import type { Hypothesis } from '../../types/agent'
-import { Lightbulb, ChevronRight } from 'lucide-react'
+import { Brain, ChevronRight, Shield } from 'lucide-react'
 
 export default function HypothesisCard({ hypothesis }: { hypothesis: Hypothesis }) {
   return (
-    <div className="rounded-lg border border-blue-800/50 bg-blue-950/20 p-3 space-y-2">
+    <div className="rounded-xl border border-purple-500/30 bg-purple-950/20 p-3 space-y-2.5 neon-border-purple">
       <div className="flex items-start gap-2">
-        <Lightbulb size={14} className="text-blue-400 mt-0.5 shrink-0" />
-        <div>
-          <p className="text-sm font-semibold text-slate-100">{hypothesis.hypothesis_title}</p>
-          <p className="text-xs text-slate-400 mt-0.5">{hypothesis.root_cause_explanation}</p>
+        <Brain size={14} className="text-purple-400 mt-0.5 shrink-0" style={{ filter: 'drop-shadow(0 0 4px #a78bfa)' }} />
+        <div className="min-w-0">
+          <p className="text-sm font-bold text-slate-100 leading-tight">{hypothesis.hypothesis_title}</p>
+          <p className="text-xs text-slate-400 mt-1 leading-relaxed">{hypothesis.root_cause_explanation}</p>
         </div>
       </div>
 
       {hypothesis.evidence.length > 0 && (
         <div>
-          <p className="text-xs font-semibold text-slate-500 mb-1">Evidence</p>
-          <ul className="space-y-0.5">
-            {hypothesis.evidence.map((e, i) => (
-              <li key={i} className="flex items-start gap-1 text-xs text-slate-400">
-                <ChevronRight size={10} className="mt-0.5 shrink-0 text-slate-600" />
+          <p className="text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1.5">Evidence</p>
+          <ul className="space-y-1">
+            {hypothesis.evidence.slice(0, 4).map((e, i) => (
+              <li key={i} className="flex items-start gap-1.5 text-xs text-slate-400">
+                <ChevronRight size={10} className="mt-0.5 shrink-0 text-purple-600" />
                 {e}
               </li>
             ))}
@@ -26,7 +26,10 @@ export default function HypothesisCard({ hypothesis }: { hypothesis: Hypothesis 
         </div>
       )}
 
-      <p className="text-xs text-slate-500 italic">{hypothesis.confidence_rationale}</p>
+      <div className="flex items-center gap-1.5 text-xs text-slate-600">
+        <Shield size={10} className="text-purple-700" />
+        <span className="italic">{hypothesis.confidence_rationale}</span>
+      </div>
     </div>
   )
 }

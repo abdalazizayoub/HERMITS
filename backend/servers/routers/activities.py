@@ -17,11 +17,25 @@ class ActivityPayload(BaseModel):
     validation_result: str
 
 
+@router.post("/reset")
+async def reset_environment():
+    """Reset all VMs and ERP activities to initial state."""
+    try:
+        result = await erp.reset_me()
+        from routers.tickets import _pipeline_cache, _pipeline_running
+        _pipeline_cache.clear()
+        _pipeline_running.clear()
+        return {"ok": True, "detail": result}
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
 @router.post("/submit")
 async def submit_activity(payload: ActivityPayload):
     try:
         await erp.create_activity(payload.dict())
-        await erp.patch_ticket_status(payload.ticket_id, "DONE")
+        # Do NOT auto-mark DONE here — the frontend ActionBar does it explicitly
+        # only after the technician reviews validation and confirms completion.
         audit_logger = audit_mod.get_logger(payload.ticket_id)
         audit_logger.log(
             actor="system",

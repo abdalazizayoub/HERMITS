@@ -9,12 +9,14 @@ import AIAnalysisPane from './AIAnalysisPane'
 import TerminalPane from './TerminalPane'
 import ActionBar from './ActionBar'
 import LoadingSpinner from '../shared/LoadingSpinner'
-import { Inbox } from 'lucide-react'
+import { Inbox, Zap } from 'lucide-react'
 
 export default function WorkbenchPanel() {
   const activeTicketId = useWorkbenchStore((s) => s.activeTicketId)
   const mode = useWorkbenchStore((s) => s.mode)
   const phase1Result = useWorkbenchStore((s) => s.phase1Result)
+  const reanalyzeKey = useWorkbenchStore((s) => s.reanalyzeKey)
+  const consumeForceRefresh = useWorkbenchStore((s) => s.consumeForceRefresh)
   const setReconOutput = useWorkbenchStore((s) => s.setReconOutput)
   const writeToTerminal = useWorkbenchStore((s) => s.writeToTerminal)
 
@@ -22,18 +24,23 @@ export default function WorkbenchPanel() {
   const { run: runPhase1 } = usePhase1()
   const { run: runPhase2 } = usePhase2()
 
-  // Ref to track which ticket we last started analysis for (prevents double-fire in StrictMode)
-  const lastStartedRef = useRef<number | null>(null)
+  // Composite key: ticket + reanalyzeKey — prevents double-fire in StrictMode
+  // and correctly re-fires when reanalyze() is called on the same ticket.
+  const lastStartedRef = useRef<string | null>(null)
 
+  // Phase 1 trigger — only runs if mode is phase1_loading (not restored sessions)
   useEffect(() => {
     if (!activeTicketId || mode !== 'phase1_loading') return
-    if (lastStartedRef.current === activeTicketId) return
-    lastStartedRef.current = activeTicketId
+    const runKey = `${activeTicketId}-${reanalyzeKey}`
+    if (lastStartedRef.current === runKey) return
+    lastStartedRef.current = runKey
+    // Consume the force-refresh flag set by reanalyze() — passes it to backend
+    // so the prewarm cache is bypassed and fresh analysis is generated.
+    const forceRefresh = consumeForceRefresh()
+    runPhase1(activeTicketId, forceRefresh)
+  }, [activeTicketId, mode, reanalyzeKey, consumeForceRefresh, runPhase1])
 
-    runPhase1(activeTicketId)
-  }, [activeTicketId, mode, runPhase1])
-
-  // When Phase 1 done → run recon → Phase 2
+  // Recon + Phase 2 — only runs when explicitly in recon_loading
   useEffect(() => {
     if (mode !== 'recon_loading' || !activeTicketId) return
 
@@ -43,13 +50,12 @@ export default function WorkbenchPanel() {
         const recon = await runRecon(activeTicketId!)
         setReconOutput(recon)
 
-        // Write recon sections to terminal
         const sections = ['logs', 'service_statuses', 'disk_usage', 'network', 'database']
         for (const key of sections) {
           const val = recon[key]
           if (val) {
             writeToTerminal(`\r\n\x1b[33m── ${key.replace('_', ' ')} ──\x1b[0m\r\n`, 'warn')
-            const lines = val.split('\n').slice(0, 20)
+            const lines = val.split('\n').slice(0, 15)
             for (const line of lines) {
               if (line.trim()) writeToTerminal(line)
             }
@@ -61,7 +67,6 @@ export default function WorkbenchPanel() {
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         writeToTerminal(`\x1b[31m[ERROR] Recon failed: ${msg}\x1b[0m\r\n`, 'error')
-        // Still try Phase 2 with empty recon
         await runPhase2(activeTicketId!, {}, phase1Result)
       }
     }
@@ -71,39 +76,45 @@ export default function WorkbenchPanel() {
 
   if (!activeTicketId) {
     return (
-      <div className="flex flex-col items-center justify-center h-full text-slate-600 gap-3">
-        <Inbox size={40} />
-        <p className="text-sm text-slate-500">Select a ticket from the left panel</p>
+      <div className="flex flex-col items-center justify-center h-full gap-4">
+        <div className="relative">
+          <Inbox size={48} className="text-slate-800" />
+          <Zap size={16} className="text-cyan-700 absolute -top-1 -right-1" />
+        </div>
+        <div className="text-center">
+          <p className="text-sm text-slate-600 font-medium">No ticket selected</p>
+          <p className="text-xs text-slate-700 mt-1">Pick a ticket from the left panel to begin</p>
+        </div>
       </div>
     )
   }
 
   return (
     <div className="flex flex-col h-full">
-      {/* Ticket header */}
       {ticket ? (
         <TicketHeader ticket={ticket} />
       ) : (
-        <div className="px-4 py-3 border-b border-slate-800 flex items-center gap-2 text-slate-500 text-sm">
-          <LoadingSpinner size={14} />
+        <div
+          className="px-4 py-3 border-b flex items-center gap-2 text-slate-600 text-xs glass"
+          style={{ borderBottomColor: 'rgba(34,211,238,0.12)' }}
+        >
+          <LoadingSpinner size={13} />
           Loading ticket...
         </div>
       )}
 
-      {/* Main split: analysis + terminal */}
       <div className="flex-1 flex min-h-0">
-        {/* AI Analysis pane */}
-        <div className="w-[45%] border-r border-slate-800 overflow-y-auto">
+        <div
+          className="w-[44%] shrink-0 border-r overflow-y-auto"
+          style={{ borderRightColor: 'rgba(34,211,238,0.1)' }}
+        >
           <AIAnalysisPane />
         </div>
-
-        {/* Terminal pane */}
         <div className="flex-1 min-w-0">
           <TerminalPane />
         </div>
       </div>
 
-      {/* Action bar */}
       <ActionBar />
     </div>
   )

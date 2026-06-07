@@ -15,3 +15,8 @@ export async function submitActivity(payload: ActivityPayload): Promise<{ activi
   const res = await client.post('/api/activities/submit', payload)
   return res.data
 }
+
+export async function resetEnvironment(): Promise<{ ok: boolean; detail: unknown }> {
+  const res = await client.post('/api/activities/reset')
+  return res.data
+}
