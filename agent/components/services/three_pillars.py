@@ -9,10 +9,11 @@ logger = logging.getLogger("hermits.agent.three_pillars")
 
 _UNSAFE_PATTERNS = re.compile(
     r"\b(rm|dd|mkfs|chmod|chown)\b"
-    r"|systemctl\s+(stop|disable)\b"
+    r"|systemctl\s+(stop|disable|restart|start)\b"
     r"|\b(kill|pkill|shutdown|reboot|halt)\b"
-    r"|>\s*/dev/"
-    r"|\bDROP\s+(TABLE|DATABASE)\b",
+    r"|>\s*/dev/(?!null\b)"
+    r"|\bDROP\s+(TABLE|DATABASE)\b"
+    r"|public-test\.sh",
     re.IGNORECASE,
 )
 
@@ -20,7 +21,18 @@ _SYSTEM_PROMPT_TEMPLATE = """\
 <policy>
 {memory_context}
 </policy>
-You are a senior Linux sysadmin. Given a ticket, generate exactly 3 read-only bash validation commands that define what "fixed" looks like. Return ONLY valid JSON, no markdown, no explanation.
+You are a senior Linux sysadmin. Given a ticket, generate exactly 3 lightweight read-only bash commands that measure whether the incident is resolved. These commands run as a BASELINE before any fix — they must be safe to run at any time without affecting service state.
+
+HARD CONSTRAINTS (violated commands will be rejected):
+- No sudo — all commands must run as the SSH user without privilege escalation
+- No service restarts or starts — no systemctl restart/start/stop/enable/disable
+- No /opt/hackathon/public-test.sh — that is only for final validation, not baseline measurement
+- No file writes, no reboots, no kills
+- Each command must complete in under 10 seconds
+
+Good baseline commands: curl -s -o /dev/null -w "%{{http_code}}", systemctl is-active, systemctl is-enabled, ss -tlnp | grep <port>, getent hosts <hostname>, psql -c "SELECT ...", journalctl -n 5 --no-pager
+
+Return ONLY valid JSON, no markdown, no explanation.
 
 The JSON must match this schema exactly:
 {{

@@ -1,6 +1,6 @@
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from components.gemini_client import GeminiClient
@@ -17,10 +17,14 @@ _SYSTEM_PROMPT = """\
 </policy>
 You are a senior Linux sysadmin writing an ERP incident activity report. Produce ALL five required fields in JSON. Be precise and technical. IMPORTANT: the commands_summary field must NEVER contain output values, secrets, passwords, tokens, keys, credentials, or base64 strings longer than 20 characters. Scrub any string matching password, token, key, secret, private, credential, or long base64 from commands_summary before including it. Return ONLY valid JSON, no markdown.
 
+root_cause must be the specific technical configuration error, not the symptom.
+BAD: "The status API was not available"
+GOOD: "PORT=8008 in /etc/customer-status.env caused the service to bind to the wrong port; the service was also not enabled for automatic startup"
+
 JSON schema:
 {{
   "summary": "one concise sentence of what happened and what was done",
-  "root_cause": "specific technical root cause — not the symptom",
+  "root_cause": "the misconfigured file, value, or missing setting — not the user-facing symptom",
   "actions_taken": "numbered list of diagnosis steps then fix steps in chronological order",
   "commands_summary": "list of commands run — NO output, NO secrets, NO passwords, NO tokens, NO private keys",
   "validation_result": "concrete proof — quote pillar outputs showing PASS, state what was verified"
@@ -81,14 +85,30 @@ class ERPDrafter:
 
         data = self.client.generate_json(system_prompt, user_message)
 
+        # Gemini sometimes returns list-typed values when the schema says "list of …".
+        # Coerce every field to str before doing anything else.
+        for field in ("summary", "root_cause", "actions_taken",
+                      "commands_summary", "validation_result"):
+            val = data.get(field, "")
+            if isinstance(val, list):
+                data[field] = "\n".join(str(item) for item in val)
+            elif not isinstance(val, str):
+                data[field] = str(val) if val is not None else ""
+
         # Scrub secrets from commands_summary even if Gemini missed it
         data["commands_summary"] = _scrub_secrets(data.get("commands_summary", ""))
 
-        now = datetime.utcnow()
+        def _ensure_utc(dt: Optional[datetime]) -> datetime:
+            if dt is None:
+                return datetime.now(timezone.utc)
+            if dt.tzinfo is None:
+                return dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc)
+
         activity = Activity(
             ticket_id=ticket.id,
-            start_datetime=start_datetime or now,
-            end_datetime=end_datetime or now,
+            start_datetime=_ensure_utc(start_datetime),
+            end_datetime=_ensure_utc(end_datetime),
             summary=data["summary"],
             root_cause=data["root_cause"],
             actions_taken=data["actions_taken"],

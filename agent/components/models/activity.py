@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from pydantic import BaseModel
 
 
@@ -11,3 +11,9 @@ class Activity(BaseModel):
     actions_taken: str
     commands_summary: str
     validation_result: str
+
+    model_config = {
+        "json_encoders": {
+            datetime: lambda dt: dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+        }
+    }

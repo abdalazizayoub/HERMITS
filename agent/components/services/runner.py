@@ -110,6 +110,7 @@ class HermitsAgent:
         pillar_baseline_results: PillarResult,
         technician_id: str,
         phase1_result: Phase1Result,
+        failure_context: str = "",
     ) -> AgentRunResult:
         """
         Called after Person A returns recon data and pillar baseline.
@@ -126,6 +127,7 @@ class HermitsAgent:
             pillar_baseline=pillar_baseline_results,
             kb_matches=kb_matches,
             memory_context=memory_context,
+            failure_context=failure_context,
         )
 
         best_hypothesis_result.hypothesis.fix_steps = self.trust.reorder_fix_steps(
@@ -157,6 +159,7 @@ class HermitsAgent:
         technician_notes: str,
         resolution_time_minutes: int,
         command_decisions: list[tuple[str, bool]],
+        pillar_baseline: Optional[PillarResult] = None,
     ) -> CompletionResult:
         run_result = self._run_results.get(ticket.id)
         if run_result is None:
@@ -167,7 +170,7 @@ class HermitsAgent:
         pillar_spec = run_result.pillar_spec
         chosen_hypothesis = run_result.best_hypothesis.hypothesis
 
-        baseline = PillarResult(
+        baseline = pillar_baseline or PillarResult(
             service_state_output="(baseline captured at run_ticket)",
             functional_impact_output="(baseline captured at run_ticket)",
             durability_output="(baseline captured at run_ticket)",

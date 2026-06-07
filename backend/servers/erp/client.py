@@ -48,7 +48,13 @@ async def patch_ticket_status(ticket_id: int, status: str):
     return response.json()
 
 async def create_activity(payload: dict):
-    response = await _client.post("/api/v1/activities/create", json=payload)
+    cleaned = {}
+    for k, v in payload.items():
+        if hasattr(v, "isoformat"):
+            cleaned[k] = v.isoformat()
+        else:
+            cleaned[k] = v
+    response = await _client.post("/api/v1/activities/create", json=cleaned)
     response.raise_for_status()
     return response.json()
 

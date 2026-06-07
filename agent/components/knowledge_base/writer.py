@@ -60,10 +60,11 @@ def _failed_services(recon_output: dict) -> list[str]:
 
 def _disk_critical(recon_output: dict) -> bool:
     disk = recon_output.get("disk_usage", {})
-    for mount, info in disk.items():
-        if isinstance(info, dict):
-            if info.get("used_pct", 0) > 90 or info.get("inode_pct", 0) > 90:
-                return True
+    if isinstance(disk, str):
+        return bool(re.search(r"9[0-9]%|100%", disk))
+    if isinstance(disk, dict):
+        combined = " ".join(str(v) for v in disk.values())
+        return bool(re.search(r"9[0-9]%|100%", combined))
     return False
 
 
@@ -88,9 +89,9 @@ class KBWriter:
         disk_crit = _disk_critical(recon_output)
 
         fix_commands = [
-            step["command"]
+            step.get("command", "")
             for step in executed_steps
-            if step.get("approved", False)
+            if step.get("command")
         ]
 
         erp_snippet = (
