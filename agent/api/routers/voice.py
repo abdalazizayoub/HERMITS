@@ -2,10 +2,12 @@
 Voice endpoints — on-demand MP3 summaries and monthly digest.
 
 GET  /api/agent/ai/voice/summary/{ticket_id}  — ticket summary as MP3
-POST /api/agent/ai/voice/digest               — monthly digest metadata
+POST /api/agent/ai/voice/digest               — monthly digest metadata (no audio)
 POST /api/agent/ai/voice/digest/audio         — monthly digest as MP3
 """
 from __future__ import annotations
+
+import asyncio
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
@@ -33,41 +35,45 @@ async def ticket_voice_summary(ticket_id: int):
     try:
         ticket = await fetch_ticket_from_erp(ticket_id)
         kb_matches = get_kb_matcher().match(ticket, {})
-        audio_bytes = get_voice_summary().generate(ticket, kb_matches)
+
+        loop = asyncio.get_event_loop()
+        audio_bytes = await loop.run_in_executor(
+            None, lambda: get_voice_summary().generate(ticket, kb_matches)
+        )
         return Response(content=audio_bytes, media_type="audio/mpeg")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/digest", summary="Monthly digest metadata (no audio)")
-def monthly_digest_meta(req: DigestRequest):
+async def monthly_digest_meta(req: DigestRequest):
     """
-    Generates a monthly IT-ops narrative from resolved KB entries.
-    Returns transcript + statistics (no audio bytes to keep payload small).
+    Generates a monthly IT-ops narrative from resolved KB entries using Gemini.
+    Returns transcript + statistics only — no ElevenLabs call, so it's fast.
     """
     try:
         entries = get_kb_store().load_all()
-        result = get_monthly_digest().generate(entries, req.month)
-        return {
-            "month": req.month,
-            "transcript": result.transcript,
-            "top_incidents": result.top_incidents,
-            "avg_resolution_minutes": result.avg_resolution_minutes,
-            "total_tickets": result.total_tickets,
-            "most_common_root_cause": result.most_common_root_cause,
-        }
+        loop = asyncio.get_event_loop()
+        meta = await loop.run_in_executor(
+            None, lambda: get_monthly_digest().generate_meta(entries, req.month)
+        )
+        return {"month": req.month, **meta}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/digest/audio", summary="Monthly digest as MP3")
-def monthly_digest_audio(req: DigestRequest):
+async def monthly_digest_audio(req: DigestRequest):
     """
-    Same as /digest but returns the audio as audio/mpeg bytes.
+    Generates Gemini transcript + ElevenLabs audio for the monthly digest.
+    Returns audio/mpeg bytes.
     """
     try:
         entries = get_kb_store().load_all()
-        result = get_monthly_digest().generate(entries, req.month)
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            None, lambda: get_monthly_digest().generate(entries, req.month)
+        )
         return Response(content=result.audio_bytes, media_type="audio/mpeg")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
