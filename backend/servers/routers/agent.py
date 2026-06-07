@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
@@ -95,8 +96,64 @@ def adapt_recon_for_agent(recon: dict) -> dict:
         "collector": recon.get("collector_status", ""),
         "collector_detail": recon.get("collector_detail", "") + "\n" + recon.get("collector_logs", ""),
         "opt_files": recon.get("opt_files", ""),
+        "service_envs":   recon.get("service_envs", ""),
+        "metrics_detail": recon.get("metrics_services", ""),
         "raw": recon,
     }
+
+
+async def _observe_after_command(command: str, session: dict, key_path: str) -> dict:
+    """Run targeted read-only checks after a command to observe its effect."""
+    observations = {}
+    host     = session["host"]
+    port     = session["port"]
+    username = session["username"]
+
+    if "systemctl" in command:
+        svc = re.search(r'systemctl\s+\S+\s+([\w.-]+)', command)
+        if svc:
+            name = svc.group(1)
+            obs = await ssh.run_command(
+                host, port, username, key_path,
+                f"systemctl is-active {name} && systemctl show {name} | grep -E 'ActiveState|Environment|ExecStart' | head -5"
+            )
+            observations["service_state_after"] = obs.get("stdout", "")
+
+    if "sed -i" in command or "tee -a" in command or "echo" in command:
+        path = re.search(r"'[^']*'\s+(/\S+)", command) or re.search(r"(/etc/\S+\.env|/opt/\S+\.env)", command)
+        if path:
+            obs = await ssh.run_command(
+                host, port, username, key_path,
+                f"cat {path.group(1)} 2>/dev/null | grep -v '^#' | grep -v '^$' | head -10"
+            )
+            observations["file_after_edit"] = obs.get("stdout", "")
+
+    if "chown" in command:
+        path = re.search(r'chown\s+\S+\s+(\S+)', command)
+        if path:
+            obs = await ssh.run_command(
+                host, port, username, key_path,
+                f"ls -la {path.group(1)} 2>/dev/null | head -5"
+            )
+            observations["ownership_after"] = obs.get("stdout", "")
+
+    if "postgres" in command and "GRANT" in command.upper():
+        obs = await ssh.run_command(
+            host, port, username, key_path,
+            "sudo -u postgres psql -tAc \"SELECT grantee, privilege_type FROM information_schema.role_table_grants WHERE table_schema='public' LIMIT 20;\" 2>/dev/null"
+        )
+        observations["grants_after"] = obs.get("stdout", "")
+
+    if "/etc/hosts" in command:
+        hostname = re.search(r'(\S+\.internal|\S+\.local)', command)
+        if hostname:
+            obs = await ssh.run_command(
+                host, port, username, key_path,
+                f"getent hosts {hostname.group(1)} 2>/dev/null && echo 'resolves' || echo 'still not resolving'"
+            )
+            observations["dns_after"] = obs.get("stdout", "")
+
+    return observations
 
 
 class ReconRequest(BaseModel):
@@ -216,7 +273,22 @@ async def execute_command(req: ExecuteRequest):
             result=(result.get("stdout") or "") + (result.get("stderr") or ""),
             exit_code=result.get("exit_code", 255),
         )
-        return result
+
+        observations: dict = {}
+        if not result.get("blocked"):
+            try:
+                observations = await _observe_after_command(req.command, session, session["key_path"])
+                if observations:
+                    session.setdefault("observations", []).append({
+                        "command": req.command,
+                        "observations": observations,
+                    })
+                    for key, val in observations.items():
+                        audit_logger.log("system", "recon", f"post-exec observation: {key}", result=val[:200])
+            except Exception:
+                pass  # observations are best-effort; never fail the execute
+
+        return {**result, "observations": observations}
     except Exception as exc:
         # Never let infrastructure failures become HTTP 500 — return a valid response
         try:
@@ -267,6 +339,77 @@ async def validate(req: ValidateRequest):
         exit_code=0 if result["passed"] else 1,
     )
     return result
+
+
+class DiagnoseFailureRequest(BaseModel):
+    ticket_id: int
+    failure_output: str
+    executed_commands: list[str] = []
+
+
+@router.post("/diagnose_failure")
+async def diagnose_failure(req: DiagnoseFailureRequest):
+    session = _sessions.get(req.ticket_id)
+    if not session:
+        session = _load_session(req.ticket_id)
+        if session:
+            _sessions[req.ticket_id] = session
+        else:
+            raise HTTPException(400, "Session not found")
+
+    key_path = session["key_path"]
+    audit = audit_mod.get_logger(req.ticket_id)
+    failure = req.failure_output.lower()
+
+    diagnostics = {
+        "failed_services": "systemctl list-units --state=failed --no-pager",
+        "recent_errors":   "journalctl -p err -n 15 --no-pager --since '5 minutes ago'",
+        "listening_ports": "ss -tlnp",
+    }
+
+    services = list(set(re.findall(
+        r'systemctl\s+\S+\s+([\w.-]+\.service)',
+        ' '.join(req.executed_commands)
+    )))[:4]
+    if services:
+        svc_list = ' '.join(f'-u {s}' for s in services)
+        diagnostics["service_logs"] = f"journalctl {svc_list} -n 20 --no-pager 2>/dev/null"
+        diagnostics["service_env"]  = (
+            f"systemctl show {' '.join(services)} 2>/dev/null"
+            f" | grep -E 'ActiveState|Environment|EnvironmentFiles|ExecStart|LoadState'"
+        )
+
+    if any(k in failure for k in ["metric", "pipeline", "monitor", "data", "updating"]):
+        diagnostics["metrics_services"] = "systemctl status metrics-agent metrics-ingest 2>/dev/null | grep -E 'Active|Environment|error|failed'"
+        diagnostics["metrics_logs"]     = "journalctl -u metrics-agent -u metrics-ingest -n 20 --no-pager 2>/dev/null"
+        diagnostics["metrics_ports"]    = "ss -tlnp | grep -E '9091|9090|3000|8088|8080'"
+        diagnostics["env_check"]        = "find /etc /opt -name '*.env' 2>/dev/null | xargs grep -v '^#' 2>/dev/null | grep -v '^$'"
+
+    if any(k in failure for k in ["upload", "permission", "document", "write", "denied"]):
+        diagnostics["upload_dirs"]   = "find /opt /var/www /srv -type d 2>/dev/null | xargs ls -la 2>/dev/null | head -20"
+        diagnostics["recent_errors"] = "journalctl -p err -n 10 --no-pager --since '5 minutes ago'"
+
+    if any(k in failure for k in ["database", "postgres", "order", "create", "insert"]):
+        diagnostics["pg_grants"] = "sudo -u postgres psql -tAc \"SELECT grantee, privilege_type, table_name FROM information_schema.role_table_grants WHERE table_schema='public';\" 2>/dev/null"
+        diagnostics["pg_seq"]    = "sudo -u postgres psql -tAc \"SELECT * FROM information_schema.usage_privileges WHERE object_type='SEQUENCE';\" 2>/dev/null"
+
+    if any(k in failure for k in ["api", "health", "port", "refused", "unavailable"]):
+        diagnostics["all_ports"] = "ss -tlnp"
+        diagnostics["env_files"] = "find /etc /opt -name '*.env' 2>/dev/null | xargs cat 2>/dev/null | grep -v '^#' | grep -v '^$'"
+
+    if any(k in failure for k in ["sync", "partner", "reach", "resolve", "hostname"]):
+        diagnostics["hosts"]        = "cat /etc/hosts"
+        diagnostics["connectivity"] = "ss -tlnp"
+
+    results = {}
+    for label, cmd in diagnostics.items():
+        r = await ssh.run_command(
+            session["host"], session["port"], session["username"], key_path, cmd
+        )
+        results[label] = (r.get("stdout", "") + r.get("stderr", ""))[:800]
+        audit.log("system", "recon", f"failure diagnostic: {label}", command=cmd)
+
+    return {"diagnostic_results": results}
 
 
 @router.post("/reset_session")

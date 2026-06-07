@@ -269,6 +269,8 @@ class HypothesisGenerator:
             f"service_units: {str(recon_output.get('service_units', 'none found'))[:500]}\n"
             f"opt_files: {recon_output.get('opt_files', 'none found')}\n"
             f"collector_detail: {str(recon_output.get('collector_detail', 'none found'))[:3000]}\n"
+            f"service_envs: {str(recon_output.get('service_envs', ''))[:500]}\n"
+            f"metrics_detail: {str(recon_output.get('metrics_detail', ''))[:500]}\n"
             f"</recon>\n\n"
             f"<pillar_baseline>\n"
             f"service_state: → {pillar_baseline.service_state_output}\n"

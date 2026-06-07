@@ -111,9 +111,12 @@ def _phase1_to_frontend(result, pillar_baseline) -> dict:
 
 
 def _phase2_to_frontend(result) -> dict:
-    """Map backend AgentRunResult → shape the frontend Phase2Result type expects."""
+    """Map backend AgentRunResult → shape the CLI/frontend Phase2Result type expects."""
     return {
-        "hypothesis": result.best_hypothesis.hypothesis.model_dump(),
+        "best_hypothesis": {
+            "hypothesis": result.best_hypothesis.hypothesis.model_dump(),
+            "selection_rationale": result.best_hypothesis.selection_rationale or "",
+        },
         "safety_results": [
             {"is_safe": s.safe, "reason": s.reason, "warnings": []}
             for s in result.safety_checks
@@ -157,7 +160,7 @@ class CompleteRequest(BaseModel):
 async def run_phase1(req: Phase1Request):
     try:
         from erp.client import get_customer_system
-        from ssh.runner import run_pillar_baseline, get_key_path
+        from ssh.runner import run_pillar_baseline, get_key_path, run_command
 
         ticket = await fetch_ticket_from_erp(req.ticket_id)
         agent = get_agent()

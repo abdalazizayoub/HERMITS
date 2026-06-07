@@ -222,24 +222,6 @@ def run(ticket_id: int, server: str, technician: str, dry_run: bool) -> None:
         return "\n".join(lines)
 
     for attempt in range(MAX_REPAIR + 1):
-        if attempt > 0:
-            _banner(f"REPAIR {attempt}/{MAX_REPAIR} — Re-generating hypothesis")
-            _info("Validation failed. Asking the agent for a new fix plan …")
-            phase2 = post(client, f"{base}/api/agent/ai/phase2", {
-                "ticket_id":      ticket_id,
-                "technician_id":  technician,
-                "failure_context": _build_failure_context(executed_steps, val_output),
-            }, timeout=120.0)
-            best      = phase2.get("best_hypothesis", {})
-            hyp       = best.get("hypothesis", {})
-            fix_steps = hyp.get("fix_steps", [])
-            if not fix_steps:
-                _warn("No new fix steps — giving up")
-                break
-            _ok(f"New hypothesis: {_c(BOLD, hyp.get('hypothesis_title', '?'))}")
-            _info(f"Root cause: {hyp.get('root_cause_explanation', '—')}")
-            _info(f"{len(fix_steps)} new fix step(s) proposed")
-
         label = f"EXECUTE  (repair {attempt}/{MAX_REPAIR})" if attempt > 0 else "EXECUTE — Approve each command"
         _banner(label)
         print(f"  {_c(DIM, 'a=approve  d=decline  q=quit')}")
@@ -277,10 +259,11 @@ def run(ticket_id: int, server: str, technician: str, dry_run: bool) -> None:
                     if stderr: _warn(f"  stderr: {stderr[:200]}")
 
                 executed_steps.append({
-                    "command":   step.get("command", ""),
-                    "stdout":    stdout[:300],
-                    "stderr":    stderr[:200],
-                    "exit_code": exit_code,
+                    "command":      step.get("command", ""),
+                    "stdout":       stdout[:300],
+                    "stderr":       stderr[:200],
+                    "exit_code":    exit_code,
+                    "observations": result.get("observations", {}),
                 })
             elif not approved:
                 _info("Skipped")
@@ -307,15 +290,66 @@ def run(ticket_id: int, server: str, technician: str, dry_run: bool) -> None:
         for line in val_output.splitlines()[:20]:
             _info(f"  {line}")
 
-        if attempt < MAX_REPAIR:
+        if not passed and attempt < MAX_REPAIR:
+            _info("Running targeted diagnostics...")
+
+            approved_cmds = [d[0] for d in command_decisions if d[1]]
+            diag = post(client, f"{base}/api/agent/diagnose_failure", {
+                "ticket_id":         ticket_id,
+                "failure_output":    val_output,
+                "executed_commands": approved_cmds,
+            }, timeout=90.0, fatal=False)
+
+            diagnostic_context = ""
+            if diag:
+                results = diag.get("diagnostic_results", {})
+                _ok(f"{len(results)} diagnostic checks run")
+                for k, v in results.items():
+                    if v and v.strip():
+                        _info(f"  {k}: {v.replace(chr(10), ' ')[:120]}")
+                diagnostic_context = "\n".join(
+                    f"{k}:\n{v}" for k, v in results.items() if v and v.strip()
+                )
+
+            obs_context = ""
+            obs_list = [s for s in executed_steps if s.get("observations")]
+            if obs_list:
+                obs_context = "POST-EXECUTION OBSERVATIONS:\n" + "\n".join(
+                    f"After '{s['command'][:60]}':\n" +
+                    "\n".join(f"  {k}: {v[:200]}" for k, v in s.get("observations", {}).items())
+                    for s in obs_list
+                )
+
+            combined_failure = (
+                f"VALIDATION FAILED:\n{val_output}\n\n"
+                f"COMMANDS ALREADY TRIED (do not repeat):\n" +
+                "\n".join(f"- {c}" for c in approved_cmds) +
+                f"\n\nPOST-FAILURE DIAGNOSTICS:\n{diagnostic_context}\n\n"
+                f"{obs_context}"
+            )
+
             try:
                 retry = input(
-                    f"\n  {_c(YELLOW, f'Try a new fix? [{attempt+1}/{MAX_REPAIR} retries left]  [y/N]')} › "
+                    f"\n  {_c(YELLOW, f'Try new fix? [{attempt+1}/{MAX_REPAIR} left] [y/N]')} › "
                 ).strip().lower()
             except (EOFError, KeyboardInterrupt):
                 retry = "n"
             if retry not in ("y", "yes"):
                 break
+
+            phase2 = post(client, f"{base}/api/agent/ai/phase2", {
+                "ticket_id":       ticket_id,
+                "technician_id":   technician,
+                "failure_context": combined_failure,
+            }, timeout=120.0, fatal=True)
+            best      = phase2.get("best_hypothesis", {})
+            hyp       = best.get("hypothesis", {})
+            fix_steps = hyp.get("fix_steps", [])
+            if not fix_steps:
+                _warn("No new steps proposed")
+                break
+            _ok(f"New hypothesis: {_c(BOLD, hyp.get('hypothesis_title', '?'))}")
+            _info(f"Root cause: {hyp.get('root_cause_explanation', '—')}")
 
     # ── Collect pillar-after results ───────────────────────────────────────────
     # Use the before-baseline as a template; the ERP drafter will use executed_steps

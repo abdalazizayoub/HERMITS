@@ -20,7 +20,7 @@
 <script type="text/babel">
 const { useState, useEffect, useRef, useCallback } = React;
 
-const API = 'http://localhost:8080';
+const API = 'http://127.0.0.1:8080';
 
 async function apiFetch(path, options = {}) {
   const res = await fetch(API + path, {
@@ -350,7 +350,7 @@ function TicketListView({ onSelect }) {
 
 // ── Wizard (all phases) ───────────────────────────────────────────────────────
 
-const WIZARD_PHASES = ['Phase 1', 'Recon', 'Phase 2', 'Execute', 'Validate', 'Complete'];
+const WIZARD_PHASES = ['Identifying basic issue', 'Recon', 'Forming hypotheses', 'Execute', 'Validate', 'Complete'];
 const WIZARD_IDX    = { phase1: 0, recon: 1, phase2: 2, execute: 3, validate: 4, complete: 5, done: 5 };
 
 function WizardView({ ticket, onBack }) {
@@ -414,7 +414,7 @@ function WizardView({ ticket, onBack }) {
         body: JSON.stringify({ ticket_id: ticket.id, technician_id: 'ui-technician' }),
       });
       setPhase2(r);
-      const steps = r.hypothesis?.fix_steps || [];
+      const steps = r.best_hypothesis?.hypothesis?.fix_steps || [];
       setFixSteps(steps.map(s => ({ ...s, status: 'pending', result: null })));
       setPhase('execute');
       setStatus(`${steps.length} fix step${steps.length !== 1 ? 's' : ''} proposed — approve each command below`);

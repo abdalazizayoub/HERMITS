@@ -1,0 +1,14 @@
+{
+  "file_edit": {
+    "approved": 1,
+    "rejected": 0
+  },
+  "other": {
+    "approved": 3,
+    "rejected": 0
+  },
+  "systemctl_restart": {
+    "approved": 1,
+    "rejected": 0
+  }
+}

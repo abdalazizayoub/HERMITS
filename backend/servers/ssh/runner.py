@@ -68,7 +68,7 @@ async def _run_one(conn: asyncssh.SSHClientConnection, name: str, cmd: str, time
         return name, f"ERROR: {str(e)}"
 
 
-async def run_recon(host: str, port: int, username: str, key_path: str) -> dict[str, str]:
+async def run_recon(host: str, port: int, username: str, key_path: str, service_hint: str = "", ticket_text: str = "") -> dict[str, str]:
     READ_ONLY = {
         "disk":         "df -h",
         "disk_inodes":  "df -i",
@@ -120,6 +120,9 @@ async def run_recon(host: str, port: int, username: str, key_path: str) -> dict[
         "public_test":   "cat /opt/hackathon/public-test.sh 2>/dev/null",
         "service_logs_metrics": "journalctl -u metrics-agent -u metrics-ingest -n 15 --no-pager 2>/dev/null",
         "service_show":         "systemctl show metrics-agent metrics-ingest 2>/dev/null | grep -E 'Environment|ExecStart|User|State'",
+        "metrics_services":    "systemctl status metrics-agent metrics-ingest node-exporter 2>/dev/null | grep -E 'Loaded|Active|Environment' | head -20",
+        "service_envs":        "systemctl show metrics-agent metrics-ingest customer-portal customer-status 2>/dev/null | grep -E 'Environment=|EnvironmentFiles=' | head -10",
+        "all_service_logs":    "journalctl --no-pager -n 5 $(systemctl list-units --type=service --state=active --no-pager --plain | grep -v '@' | awk '{print \"-u \" $1}' | head -20 | tr '\\n' ' ') 2>/dev/null | tail -30",
     }
     # OpenSSH default MaxSessions is 10; batch to stay safely under the limit
     _BATCH = 8

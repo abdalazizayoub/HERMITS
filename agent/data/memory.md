@@ -117,3 +117,24 @@ NEVER propose:
 Always end EVERY fix sequence with:
   sudo /opt/hackathon/public-test.sh
 This is the ground truth. If it passes, the incident is resolved.
+
+## Pipeline debugging pattern (when pipeline still fails after first fix)
+
+When metrics-agent shows "Connection refused" after METRICS_ENDPOINT was set:
+1. Verify env var actually loaded: systemctl show metrics-agent | grep Environment
+   - If empty: the sed targeted wrong section, or daemon-reload was missed
+   - Fix: sudo systemctl daemon-reload && sudo systemctl restart --no-block metrics-agent
+2. Verify ingest is listening: ss -tlnp | grep 9091
+   - If not listening: metrics-ingest crashed on startup
+   - Fix: sudo journalctl -u metrics-ingest -n 5 --no-pager then fix the error
+3. Verify env file path: find /etc /opt -name '*.env' | xargs grep -i metrics
+   - The env file may be in a different location than assumed
+
+## After EVERY fix command, verify it had effect:
+- After systemctl restart: systemctl is-active SERVICE
+- After sed on env file: cat /path/to/file | grep CHANGED_KEY
+- After chown: ls -la /path/to/dir
+- After postgres GRANT: sudo -u postgres psql -tAc "\dp"
+- After /etc/hosts edit: getent hosts HOSTNAME
+
+Never assume a command worked. Always verify before the next step.
