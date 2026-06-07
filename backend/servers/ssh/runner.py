@@ -25,9 +25,9 @@ COMMON_READ_ONLY = {
 }
 
 OPTIONAL_READ_ONLY = {
-    "service_files": "find /etc/systemd /lib/systemd -name '*.service' 2>/dev/null | xargs grep -l 'EnvironmentFile\|ExecStart' 2>/dev/null | head -20",
-    "app_configs":   "find /etc /opt /srv /var/www -maxdepth 5 -type f \( -name '*.env' -o -name '*.conf' -o -name '*.cfg' -o -name '*.ini' \) 2>/dev/null | xargs grep -iE 'port|bind|listen|upload|document|path|host|url' 2>/dev/null | head -50",
-    "upload_dirs":   "find /var/www /opt /srv /home -type d \( -name 'upload*' -o -name 'document*' -o -name 'media' -o -name 'files' \) 2>/dev/null | xargs ls -la 2>/dev/null | head -20",
+    "service_files": "find /etc/systemd /lib/systemd -name '*.service' 2>/dev/null | xargs grep -l 'EnvironmentFile\\|ExecStart' 2>/dev/null | head -20",
+    "app_configs":   "find /etc /opt /srv /var/www -maxdepth 5 -type f \\( -name '*.env' -o -name '*.conf' -o -name '*.cfg' -o -name '*.ini' \\) 2>/dev/null | xargs grep -iE 'port|bind|listen|upload|document|path|host|url' 2>/dev/null | head -50",
+    "upload_dirs":   "find /var/www /opt /srv /home -type d \\( -name 'upload*' -o -name 'document*' -o -name 'media' -o -name 'files' \\) 2>/dev/null | xargs ls -la 2>/dev/null | head -20",
     "dns_resolution": "grep -RhE 'host|HOST|endpoint|ENDPOINT|url|URL' /opt /srv /var/www /etc 2>/dev/null | grep -v '#' | head -20",
     "listening_ports": "ss -tulpn 2>/dev/null | head -50",
     "port_mismatch": "ss -tlnp 2>/dev/null | awk '{print $5}' | grep -oP ':\\K[0-9]+' | sort -un | uniq | head -50",
