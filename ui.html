@@ -398,42 +398,9 @@ function WizardView({ ticket, onBack }) {
   const decisionsRef= useRef([]);
   const allDoneRef  = useRef(false);
 
-  // ── Phase 1 ────────────────────────────────────────────────────────────────
-  const runPhase1 = useCallback(async () => {
-    setPhase('phase1');
-    setStatus('Generating pillar spec and capturing SSH baseline…');
-    try {
-      const r = await apiFetch('/api/agent/ai/phase1', {
-        method: 'POST',
-        body: JSON.stringify({ ticket_id: ticket.id, technician_id: 'ui-technician' }),
-      });
-      setPhase1(r);
-      setStatus('Phase 1 complete — starting SSH reconnaissance…');
-      runRecon();
-    } catch (e) {
-      setErr(`Phase 1 failed: ${e.message}`);
-      setStatus('Phase 1 failed');
-    }
-  }, [ticket.id]);
-
-  // ── Recon ──────────────────────────────────────────────────────────────────
-  const runRecon = useCallback(async () => {
-    setPhase('recon');
-    setStatus('Running SSH reconnaissance…');
-    try {
-      await apiFetch('/api/agent/recon', {
-        method: 'POST',
-        body: JSON.stringify({ ticket_id: ticket.id }),
-      });
-      setStatus('Recon complete — generating hypotheses…');
-    } catch (_) {
-      setStatus('Recon partial — generating hypotheses anyway…');
-    }
-    runPhase2();
-  }, [ticket.id]);
-
-  // ── Phase 2 ────────────────────────────────────────────────────────────────
+  // ── IMPORTANT REORDERING: Define Phase 2 FIRST so it's guaranteed to be in memory 
   const runPhase2 = useCallback(async () => {
+    console.log("Triggering Phase 2...");
     setPhase('phase2');
     setStatus('Analysing recon data and generating fix hypotheses…');
     try {
@@ -452,7 +419,40 @@ function WizardView({ ticket, onBack }) {
     }
   }, [ticket.id]);
 
-  // ── Validate ───────────────────────────────────────────────────────────────
+  // ── Define Recon SECOND so it safely calls Phase 2 
+  const runRecon = useCallback(async () => {
+    setPhase('recon');
+    setStatus('Running SSH reconnaissance…');
+    try {
+      await apiFetch('/api/agent/recon', {
+        method: 'POST',
+        body: JSON.stringify({ ticket_id: ticket.id }),
+      });
+      setStatus('Recon complete — generating hypotheses…');
+    } catch (_) {
+      setStatus('Recon partial — generating hypotheses anyway…');
+    }
+    runPhase2(); // Safely triggers Phase 2
+  }, [ticket.id, runPhase2]);
+
+  // ── Define Phase 1 THIRD so it safely calls Recon
+  const runPhase1 = useCallback(async () => {
+    setPhase('phase1');
+    setStatus('Generating pillar spec and capturing SSH baseline…');
+    try {
+      const r = await apiFetch('/api/agent/ai/phase1', {
+        method: 'POST',
+        body: JSON.stringify({ ticket_id: ticket.id, technician_id: 'ui-technician' }),
+      });
+      setPhase1(r);
+      setStatus('Phase 1 complete — starting SSH reconnaissance…');
+      runRecon();
+    } catch (e) {
+      setErr(`Phase 1 failed: ${e.message}`);
+      setStatus('Phase 1 failed');
+    }
+  }, [ticket.id, runRecon]);
+
   const runValidation = useCallback(async () => {
     setPhase('validate');
     setStatus('Running validation script on VM…');
@@ -471,7 +471,7 @@ function WizardView({ ticket, onBack }) {
   }, [ticket.id]);
 
   // Kick off Phase 1 on mount
-  useEffect(() => { runPhase1(); }, []);
+  useEffect(() => { runPhase1(); }, [runPhase1]);
 
   // ── Step approval ──────────────────────────────────────────────────────────
   async function approveStep(index, command) {
@@ -545,7 +545,6 @@ function WizardView({ ticket, onBack }) {
       durability_output:        (valResult?.output || '').slice(0, 500),
     };
     
-    // STRICT FORMATTER: Drops milliseconds and enforces Z timezone
     const toUTCISO = (dateVal) => {
       try {
         return new Date(dateVal).toISOString().split('.')[0] + 'Z';
@@ -555,7 +554,6 @@ function WizardView({ ticket, onBack }) {
     };
 
     try {
-      // Draft activity via AI Complete step
       const completeResp = await apiFetch('/api/agent/ai/complete', {
         method: 'POST',
         body: JSON.stringify({
@@ -572,7 +570,6 @@ function WizardView({ ticket, onBack }) {
 
       const act = completeResp.activity || completeResp;
 
-      // Strict ERP Payload Construction
       const erpPayload = {
         ticket_id:         ticket.id,
         start_datetime:    toUTCISO(act.start_datetime || startRef.current),
@@ -584,13 +581,11 @@ function WizardView({ ticket, onBack }) {
         validation_result: act.validation_result || valResult?.output?.slice(0, 500) || 'Validation successful.'
       };
 
-      // Submit to ERP
       await apiFetch('/api/activities/submit', {
         method: 'POST',
         body: JSON.stringify(erpPayload),
       });
 
-      // Mark ticket done — will auto-refresh on the list page
       await apiFetch(`/api/tickets/${ticket.id}/status`, {
         method: 'PATCH',
         body: JSON.stringify({ status: 'done' }),
@@ -611,15 +606,11 @@ function WizardView({ ticket, onBack }) {
 
   return (
     <div className="flex h-screen overflow-hidden">
-      {/* ── Main wizard panel ─────────────────────────────────────────────── */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
 
         {/* Header */}
         <div className="flex-none bg-gray-900/80 border-b border-gray-800 px-6 py-4">
-          <button
-            onClick={onBack}
-            className="text-xs text-gray-600 hover:text-gray-400 mb-2 flex items-center gap-1 transition-colors"
-          >← All tickets</button>
+          <button onClick={onBack} className="text-xs text-gray-600 hover:text-gray-400 mb-2 flex items-center gap-1 transition-colors">← All tickets</button>
 
           <div className="flex items-start gap-3 mb-4">
             <div className="flex-1 min-w-0">
@@ -629,30 +620,17 @@ function WizardView({ ticket, onBack }) {
                 {(ticket.customer_name || ticket.customer) && (
                   <span className="text-xs text-gray-500">{ticket.customer_name || ticket.customer}</span>
                 )}
-                {ticket.priority && (
-                  <Badge text={ticket.priority} cls={PRI_CLS[(ticket.priority || '').toLowerCase()]} />
-                )}
-                {ticket.status && (
-                  <Badge text={ticket.status} cls={STA_CLS[(ticket.status || '').toLowerCase()]} />
-                )}
+                {ticket.priority && <Badge text={ticket.priority} cls={PRI_CLS[(ticket.priority || '').toLowerCase()]} />}
+                {ticket.status && <Badge text={ticket.status} cls={STA_CLS[(ticket.status || '').toLowerCase()]} />}
               </div>
             </div>
           </div>
 
-          {/* Phase progress bar */}
           <div className="flex items-center gap-1 mb-3">
             {WIZARD_PHASES.map((label, i) => (
               <React.Fragment key={i}>
-                <div className={`flex items-center gap-1.5 text-xs whitespace-nowrap ${
-                  i === phaseIdx ? 'text-cyan-400' :
-                  i < phaseIdx  ? 'text-green-500' :
-                                  'text-gray-700'
-                }`}>
-                  <div className={`w-2 h-2 rounded-full flex-none ${
-                    i === phaseIdx ? 'bg-cyan-400 ring-2 ring-cyan-400/30 animate-pulse' :
-                    i < phaseIdx  ? 'bg-green-600' :
-                                    'bg-gray-800'
-                  }`} />
+                <div className={`flex items-center gap-1.5 text-xs whitespace-nowrap ${i === phaseIdx ? 'text-cyan-400' : i < phaseIdx ? 'text-green-500' : 'text-gray-700'}`}>
+                  <div className={`w-2 h-2 rounded-full flex-none ${i === phaseIdx ? 'bg-cyan-400 ring-2 ring-cyan-400/30 animate-pulse' : i < phaseIdx ? 'bg-green-600' : 'bg-gray-800'}`} />
                   {label}
                 </div>
                 {i < WIZARD_PHASES.length - 1 && (
@@ -662,7 +640,6 @@ function WizardView({ ticket, onBack }) {
             ))}
           </div>
 
-          {/* Live agent status (Category D) */}
           <div className="flex items-center gap-2">
             {isAutoPhase && <Spinner />}
             {!isAutoPhase && phase !== 'done' && <span className="text-cyan-500 text-xs">●</span>}
@@ -682,15 +659,11 @@ function WizardView({ ticket, onBack }) {
               <div className="space-y-3">
                 {phase1.kb_matches && phase1.kb_matches.length > 0 && (
                   <div className="rounded-lg bg-gray-800/40 border border-gray-700/60 p-4">
-                    <p className="text-xs text-gray-500 mb-2.5">
-                      Knowledge Base — {phase1.kb_matches.length} match{phase1.kb_matches.length !== 1 ? 'es' : ''}
-                    </p>
+                    <p className="text-xs text-gray-500 mb-2.5">Knowledge Base — {phase1.kb_matches.length} match{phase1.kb_matches.length !== 1 ? 'es' : ''}</p>
                     <div className="space-y-2">
                       {phase1.kb_matches.slice(0, 3).map((m, i) => (
                         <div key={i} className="flex items-start gap-3 text-xs">
-                          <span className="flex-none text-cyan-500 font-mono tabular-nums w-8 text-right">
-                            {Math.round((m.similarity_score || 0) * 100)}%
-                          </span>
+                          <span className="flex-none text-cyan-500 font-mono tabular-nums w-8 text-right">{Math.round((m.similarity_score || 0) * 100)}%</span>
                           <span className="text-gray-300">{(m.root_cause || '').slice(0, 130)}</span>
                         </div>
                       ))}
@@ -704,9 +677,7 @@ function WizardView({ ticket, onBack }) {
                       <p><span className="text-gray-600">service_state:     </span><span className="text-green-300">{phase1.pillar_spec.service_state_cmd}</span></p>
                       <p><span className="text-gray-600">functional_impact: </span><span className="text-green-300">{phase1.pillar_spec.functional_impact_cmd}</span></p>
                       <p><span className="text-gray-600">durability:        </span><span className="text-green-300">{phase1.pillar_spec.durability_cmd}</span></p>
-                      {phase1.pillar_spec.definition_of_done && (
-                        <p><span className="text-gray-600">done_when:         </span><span className="text-gray-400">{phase1.pillar_spec.definition_of_done}</span></p>
-                      )}
+                      {phase1.pillar_spec.definition_of_done && <p><span className="text-gray-600">done_when:         </span><span className="text-gray-400">{phase1.pillar_spec.definition_of_done}</span></p>}
                     </div>
                   </div>
                 )}
@@ -714,55 +685,41 @@ function WizardView({ ticket, onBack }) {
             </section>
           )}
 
-          {/* Phase 2 hypothesis */}
-          {phase2 && phase2.best_hypothesis && phase2.best_hypothesis.hypothesis && (
+          {/* Phase 2 hypothesis — FORGIVING RENDER */}
+          {phase2 && (
             <section>
               <p className="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-3">Phase 2 — Best Hypothesis</p>
               <div className="rounded-lg bg-gray-800/40 border border-gray-700/60 p-4">
-                <p className="text-white font-semibold mb-1">{phase2.best_hypothesis.hypothesis.hypothesis_title}</p>
-                {phase2.best_hypothesis.hypothesis.root_cause_explanation && (
+                <p className="text-white font-semibold mb-1">{phase2.best_hypothesis?.hypothesis?.hypothesis_title || 'Hypothesis Generated'}</p>
+                
+                {phase2.best_hypothesis?.hypothesis?.root_cause_explanation && (
                   <p className="text-gray-400 text-sm mb-3 leading-relaxed">{phase2.best_hypothesis.hypothesis.root_cause_explanation}</p>
                 )}
-                {phase2.best_hypothesis.selection_rationale && (
+                {phase2.best_hypothesis?.selection_rationale && (
                   <p className="text-cyan-400/80 text-xs mb-3 italic">Rationale: {phase2.best_hypothesis.selection_rationale}</p>
                 )}
-                {phase2.best_hypothesis.hypothesis.evidence && phase2.best_hypothesis.hypothesis.evidence.length > 0 && (
+                {phase2.best_hypothesis?.hypothesis?.evidence && phase2.best_hypothesis.hypothesis.evidence.length > 0 && (
                   <div className="space-y-1">
                     {phase2.best_hypothesis.hypothesis.evidence.slice(0, 4).map((e, i) => (
                       <p key={i} className="text-xs text-gray-500">· {String(e).slice(0, 130)}</p>
                     ))}
                   </div>
                 )}
-                {phase2.recon_summary && (
-                  <p className="text-xs text-gray-600 mt-2 italic">{phase2.recon_summary.slice(0, 200)}</p>
-                )}
+                {phase2.recon_summary && <p className="text-xs text-gray-600 mt-2 italic">{phase2.recon_summary.slice(0, 200)}</p>}
               </div>
             </section>
           )}
 
-          {/* Fix steps (Category D) */}
+          {/* Fix steps */}
           {fixSteps.length > 0 && (
             <section>
               <p className="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-3">
                 Fix Steps
-                {phase === 'execute' && pendingIdx !== -1 && (
-                  <span className="ml-2 text-cyan-600 normal-case">
-                    — {fixSteps.filter(s => s.status === 'pending').length} pending
-                  </span>
-                )}
+                {phase === 'execute' && pendingIdx !== -1 && <span className="ml-2 text-cyan-600 normal-case">— {fixSteps.filter(s => s.status === 'pending').length} pending</span>}
               </p>
               <div className="space-y-3">
                 {fixSteps.map((step, i) => (
-                  <FixStepCard
-                    key={i}
-                    step={step}
-                    index={i + 1}
-                    total={fixSteps.length}
-                    isActive={phase === 'execute' && i === pendingIdx}
-                    anyExecuting={executingIdx !== null}
-                    onApprove={cmd => approveStep(i, cmd)}
-                    onAbort={() => abortStep(i)}
-                  />
+                  <FixStepCard key={i} step={step} index={i + 1} total={fixSteps.length} isActive={phase === 'execute' && i === pendingIdx} anyExecuting={executingIdx !== null} onApprove={cmd => approveStep(i, cmd)} onAbort={() => abortStep(i)} />
                 ))}
               </div>
             </section>
@@ -773,48 +730,27 @@ function WizardView({ ticket, onBack }) {
             <section>
               <p className="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-3">Validation</p>
               <div className={`rounded-lg border p-4 ${valResult.passed ? 'bg-green-900/15 border-green-800/60' : 'bg-red-900/15 border-red-800/60'}`}>
-                <p className={`font-semibold text-sm mb-2 ${valResult.passed ? 'text-green-400' : 'text-red-400'}`}>
-                  {valResult.passed ? '✓ PASSED' : '✗ FAILED'}
-                </p>
-                {valResult.output && (
-                  <pre className="text-xs text-gray-400 font-mono whitespace-pre-wrap max-h-48 overflow-y-auto leading-relaxed">
-                    {valResult.output.slice(0, 2000)}
-                  </pre>
-                )}
+                <p className={`font-semibold text-sm mb-2 ${valResult.passed ? 'text-green-400' : 'text-red-400'}`}>{valResult.passed ? '✓ PASSED' : '✗ FAILED'}</p>
+                {valResult.output && <pre className="text-xs text-gray-400 font-mono whitespace-pre-wrap max-h-48 overflow-y-auto leading-relaxed">{valResult.output.slice(0, 2000)}</pre>}
               </div>
             </section>
           )}
 
-          {/* Complete form (Category A — submit button) */}
+          {/* Complete form */}
           {phase === 'complete' && (
             <section>
               <p className="text-xs font-semibold text-gray-600 uppercase tracking-wider mb-3">Submit to ERP</p>
               <div className="rounded-lg bg-gray-800/40 border border-gray-700/60 p-4 mb-4">
-                <p className="text-xs text-gray-500 mb-3">
-                  Clicking Submit will draft the activity record, post it to Phoenix ERP, and close this ticket.
-                </p>
+                <p className="text-xs text-gray-500 mb-3">Clicking Submit will draft the activity record, post it to Phoenix ERP, and close this ticket.</p>
                 <div className="mb-4">
                   <label className="block text-xs text-gray-500 mb-1.5">Technician notes (optional)</label>
-                  <textarea
-                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-gray-200 text-sm resize-y focus:outline-none focus:border-cyan-700 transition-colors"
-                    rows={3}
-                    placeholder="Add any observations or additional context…"
-                    value={notes}
-                    onChange={e => setNotes(e.target.value)}
-                  />
+                  <textarea className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-gray-200 text-sm resize-y focus:outline-none focus:border-cyan-700 transition-colors" rows={3} placeholder="Add any observations or additional context…" value={notes} onChange={e => setNotes(e.target.value)} />
                 </div>
                 <div className="flex items-center gap-4">
-                  <button
-                    onClick={submitAll}
-                    disabled={submitting}
-                    className="flex items-center gap-2 px-5 py-2.5 bg-cyan-800 hover:bg-cyan-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold text-sm rounded-lg transition-colors"
-                  >
+                  <button onClick={submitAll} disabled={submitting} className="flex items-center gap-2 px-5 py-2.5 bg-cyan-800 hover:bg-cyan-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold text-sm rounded-lg transition-colors">
                     {submitting ? <><Spinner /> Submitting…</> : '⬆ Submit to ERP'}
                   </button>
-                  <span className="text-xs text-gray-600">
-                    {executedRef.current.length} command{executedRef.current.length !== 1 ? 's' : ''} executed ·{' '}
-                    {Math.max(1, Math.round((Date.now() - startRef.current) / 60000))} min
-                  </span>
+                  <span className="text-xs text-gray-600">{executedRef.current.length} command{executedRef.current.length !== 1 ? 's' : ''} executed · {Math.max(1, Math.round((Date.now() - startRef.current) / 60000))} min</span>
                 </div>
               </div>
             </section>
@@ -827,17 +763,14 @@ function WizardView({ ticket, onBack }) {
                 <div className="text-5xl mb-3">✓</div>
                 <p className="text-green-400 font-bold text-xl">Ticket Closed</p>
                 <p className="text-gray-500 text-sm mt-2">Activity submitted to Phoenix ERP successfully.</p>
-                <button
-                  onClick={onBack}
-                  className="mt-6 px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm rounded-lg transition-colors"
-                >← Back to tickets</button>
+                <button onClick={onBack} className="mt-6 px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm rounded-lg transition-colors">← Back to tickets</button>
               </div>
             </section>
           )}
         </div>
       </div>
 
-      {/* ── Audit log sidebar (Category C) ───────────────────────────────── */}
+      {/* ── Audit log sidebar ───────────────────────────────── */}
       <div className="w-72 flex-none">
         <AuditLog ticketId={ticket.id} />
       </div>
@@ -845,16 +778,10 @@ function WizardView({ ticket, onBack }) {
   );
 }
 
-// ── App root ──────────────────────────────────────────────────────────────────
-
 function App() {
   const [ticket, setTicket] = useState(null);
-
-  return ticket
-    ? <WizardView ticket={ticket} onBack={() => setTicket(null)} />
-    : <TicketListView onSelect={setTicket} />;
+  return ticket ? <WizardView ticket={ticket} onBack={() => setTicket(null)} /> : <TicketListView onSelect={setTicket} />;
 }
-
 ReactDOM.createRoot(document.getElementById('root')).render(<App />);
 </script>
 </body>
