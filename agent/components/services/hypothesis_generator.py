@@ -184,6 +184,15 @@ class HypothesisGenerator:
     def __init__(self, client: GeminiClient | None = None):
         self.client = client or GeminiClient()
 
+    @staticmethod
+    def _trim(value: object, max_chars: int = 800) -> str:
+        """Stringify a recon value and truncate. Returns '' for empty/noise values."""
+        s = str(value).strip()
+        _NOISE = {"none found", "{}", "[]", "''", '""', "None", ""}
+        if s in _NOISE or s.lower() in _NOISE:
+            return ""
+        return s[:max_chars]
+
     def _build_user_message(
         self,
         ticket: Ticket,
@@ -194,39 +203,48 @@ class HypothesisGenerator:
     ) -> str:
         logs = recon_output.get("logs", [])
         if isinstance(logs, list):
-            log_lines = logs[-100:]
+            log_lines = logs[-40:]  # last 40 log lines is enough for signal
         else:
-            log_lines = str(logs).splitlines()[-100:]
+            log_lines = str(logs).splitlines()[-40:]
 
         past_incidents = json.dumps(
-            [m.entry.model_dump() for m in kb_matches[:3]],
+            [m.entry.model_dump() for m in kb_matches[:1]],  # top incident only to save prompt size
             default=str,
-            indent=2,
+            indent=1,
         )
 
+        # Build recon section — only include fields with actual data to reduce prompt size
+        RECON_FIELDS = [
+            ("logs",             log_lines),
+            ("service_statuses", recon_output.get("service_statuses")),
+            ("config_files",     recon_output.get("config_files")),
+            ("port_config",      recon_output.get("port_config")),
+            ("service_users",    recon_output.get("service_users")),
+            ("upload_dirs",      recon_output.get("upload_dirs")),
+            ("app_source",       str(recon_output.get("app_source", ""))[:2000]),
+            ("network",          recon_output.get("network")),
+            ("database",         recon_output.get("database")),
+            ("collector_detail", recon_output.get("collector_detail")),
+            ("disk_usage",       recon_output.get("disk_usage")),
+        ]
+        recon_lines = []
+        for key, val in RECON_FIELDS:
+            trimmed = self._trim(val)
+            if trimmed:
+                recon_lines.append(f"{key}: {trimmed}")
+        recon_section = "\n".join(recon_lines) or "no recon data"
+
+        title = ticket.title.strip().replace("\n", " ")[:200]
+        description = ticket.description.strip().replace("\n", " ")[:800]
+        service_hint = ticket.service_hint or "unknown"
         return (
             f"<ticket>\n"
-            f"title: {ticket.title}\n"
-            f"description: {ticket.description}\n"
-            f"service_hint: {ticket.service_hint or 'unknown'}\n"
+            f"title: {title}\n"
+            f"description: {description}\n"
+            f"service_hint: {service_hint}\n"
             f"priority: {ticket.priority}\n"
             f"</ticket>\n\n"
-            f"<recon>\n"
-            f"logs: {log_lines}\n"
-            f"service_statuses: {recon_output.get('service_statuses', {})}\n"
-            f"disk_usage: {recon_output.get('disk_usage', {})}\n"
-            f"processes: {recon_output.get('processes', [])[:20]}\n"
-            f"cron_timers: {recon_output.get('cron_timers', [])}\n"
-            f"config_files: {recon_output.get('config_files', 'none found')}\n"
-            f"port_config: {recon_output.get('port_config', 'none found')}\n"
-            f"service_users: {recon_output.get('service_users', 'none found')}\n"
-            f"upload_dirs: {recon_output.get('upload_dirs', 'none found')}\n"
-            f"app_source: {str(recon_output.get('app_source', ''))[:3000] or 'none found'}\n"
-            f"network: {recon_output.get('network', 'none found')}\n"
-            f"database: {recon_output.get('database', 'none found')}\n"
-            f"collector: {recon_output.get('collector', 'none found')}\n"
-            f"collector_detail: {recon_output.get('collector_detail', 'none found')}\n"
-            f"</recon>\n\n"
+            f"<recon>\n{recon_section}\n</recon>\n\n"
             f"<pillar_baseline>\n"
             f"service_state: → {pillar_baseline.service_state_output}\n"
             f"functional_impact: → {pillar_baseline.functional_impact_output}\n"
@@ -236,7 +254,7 @@ class HypothesisGenerator:
             + (
                 f"\n\n<previous_fix_attempt_failed>\n"
                 f"A previous fix was applied but the system is STILL BROKEN.\n"
-                f"Validation output showing what remains failing:\n{failure_context[:1000]}\n"
+                f"Validation output showing what remains failing:\n{failure_context[:800]}\n"
                 f"Generate NEW hypotheses targeting what the previous fix missed. "
                 f"Do NOT repeat commands that were already tried.\n"
                 f"</previous_fix_attempt_failed>"

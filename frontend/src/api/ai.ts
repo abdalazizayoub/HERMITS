@@ -2,10 +2,15 @@ import client from './client'
 import type { Phase1Result, Phase2Result, PillarResult, ExecutedStep } from '../types/agent'
 
 // SSE-based Phase 1
-export async function startPhase1(ticketId: number, technicianId = 'default'): Promise<{ job_id: string }> {
+export async function startPhase1(
+  ticketId: number,
+  technicianId = 'default',
+  forceRefresh = false,
+): Promise<{ job_id: string }> {
   const res = await client.post('/api/agent/ai/phase1/start', {
     ticket_id: ticketId,
     technician_id: technicianId,
+    force_refresh: forceRefresh,
   })
   return res.data
 }
@@ -35,10 +40,15 @@ export function streamPhase2Status(jobId: string): EventSource {
 }
 
 // Fallback: direct POST (non-streaming)
-export async function runPhase1Direct(ticketId: number, technicianId = 'default'): Promise<Phase1Result> {
+export async function runPhase1Direct(
+  ticketId: number,
+  technicianId = 'default',
+  forceRefresh = false,
+): Promise<Phase1Result> {
   const res = await client.post('/api/agent/ai/phase1', {
     ticket_id: ticketId,
     technician_id: technicianId,
+    force_refresh: forceRefresh,
   })
   return res.data
 }

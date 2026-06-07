@@ -62,10 +62,13 @@ class ThreePillarsGenerator:
 
     def generate(self, ticket: Ticket, memory_context: str = "") -> ThreePillarSpec:
         system_prompt = _SYSTEM_PROMPT_TEMPLATE.format(memory_context=memory_context)
+        title = ticket.title.strip().replace("\n", " ")[:200]
+        description = ticket.description.strip().replace("\n", " ")[:600]
+        service_hint = ticket.service_hint or "unknown"
         user_message = (
-            f"Title: {ticket.title}\n"
-            f"Description: {ticket.description}\n"
-            f"Service hint: {ticket.service_hint or 'unknown'}"
+            f"Title: {title}\n"
+            f"Description: {description}\n"
+            f"Service hint: {service_hint}"
         )
 
         last_error = None

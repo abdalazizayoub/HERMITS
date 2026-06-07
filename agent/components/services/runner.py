@@ -71,13 +71,15 @@ class HermitsAgent:
         self,
         ticket: Ticket,
         technician_id: str,
+        force_refresh: bool = False,
     ) -> Phase1Result:
         """
         Fires immediately when technician opens ticket.
         Returns pillar spec so Person A can run SSH recon.
-        Also checks prewarm cache — if hit, returns full result immediately.
+        Checks prewarm cache unless force_refresh=True (set by re-analyze).
+        Caches result after every live run so re-opens are instant.
         """
-        if self.cache.is_warm(ticket.id):
+        if not force_refresh and self.cache.is_warm(ticket.id):
             cached = self.cache.get(ticket.id)
             if cached is not None:
                 logger.info("Cache hit for ticket %s", ticket.id)
@@ -90,11 +92,14 @@ class HermitsAgent:
                     full_result=None,
                 )
 
+        if force_refresh:
+            self.cache.invalidate(ticket.id)
+
         memory_context = load_memory_context()
         kb_matches = self.kb_matcher.match(ticket, {})
         pillar_spec = self.pillar_gen.generate(ticket, memory_context)
 
-        return Phase1Result(
+        result = Phase1Result(
             ticket_id=ticket.id,
             cache_hit=False,
             pillar_spec=pillar_spec,
@@ -102,6 +107,9 @@ class HermitsAgent:
             memory_context=memory_context,
             full_result=None,
         )
+        # Cache so re-opens of the same ticket are instant
+        self.cache.set(ticket.id, result)
+        return result
 
     def run_ticket_phase2(
         self,

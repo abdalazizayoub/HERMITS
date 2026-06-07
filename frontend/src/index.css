@@ -10,11 +10,12 @@
   html, body, #root {
     height: 100%;
     overflow: hidden;
+    background-color: #020617;
   }
 
   ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 5px;
+    height: 5px;
   }
 
   ::-webkit-scrollbar-track {
@@ -22,15 +23,80 @@
   }
 
   ::-webkit-scrollbar-thumb {
-    background: #334155;
+    background: rgba(34, 211, 238, 0.25);
     border-radius: 3px;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background: #475569;
+    background: rgba(34, 211, 238, 0.5);
   }
 }
 
 .xterm-viewport {
   overflow-y: auto !important;
+}
+
+@layer utilities {
+  .neon-border-cyan {
+    border-color: #22d3ee;
+    box-shadow: 0 0 10px rgba(34, 211, 238, 0.3), inset 0 0 10px rgba(34, 211, 238, 0.04);
+  }
+  .neon-border-green {
+    border-color: #34d399;
+    box-shadow: 0 0 10px rgba(52, 211, 153, 0.3), inset 0 0 10px rgba(52, 211, 153, 0.04);
+  }
+  .neon-border-purple {
+    border-color: #a78bfa;
+    box-shadow: 0 0 10px rgba(167, 139, 250, 0.3);
+  }
+  .neon-border-red {
+    border-color: #f87171;
+    box-shadow: 0 0 10px rgba(248, 113, 113, 0.3);
+  }
+  .neon-border-orange {
+    border-color: #fb923c;
+    box-shadow: 0 0 10px rgba(251, 146, 60, 0.3);
+  }
+  .neon-border-pink {
+    border-color: #f472b6;
+    box-shadow: 0 0 10px rgba(244, 114, 182, 0.3);
+  }
+
+  .glass {
+    background: rgba(15, 23, 42, 0.85);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+
+  .gradient-text {
+    background: linear-gradient(135deg, #22d3ee, #a78bfa);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .gradient-text-green {
+    background: linear-gradient(135deg, #34d399, #22d3ee);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+}
+
+@keyframes progressPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+.pipeline-active {
+  animation: progressPulse 1.4s ease-in-out infinite;
+}
+
+@keyframes neonGlow {
+  0% { box-shadow: 0 0 4px rgba(34,211,238,0.3); }
+  100% { box-shadow: 0 0 18px rgba(34,211,238,0.65); }
+}
+
+.neon-active {
+  animation: neonGlow 1.8s ease-in-out infinite alternate;
 }

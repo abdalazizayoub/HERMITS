@@ -5,18 +5,18 @@ interface BadgeProps {
 }
 
 const VARIANTS = {
-  critical: 'bg-red-900/60 text-red-300 border border-red-700',
-  high: 'bg-amber-900/60 text-amber-300 border border-amber-700',
-  open: 'bg-blue-900/60 text-blue-300 border border-blue-700',
-  done: 'bg-emerald-900/60 text-emerald-300 border border-emerald-700',
-  low: 'bg-emerald-900/60 text-emerald-300 border border-emerald-700',
-  medium: 'bg-amber-900/60 text-amber-300 border border-amber-700',
-  error: 'bg-red-900/60 text-red-300 border border-red-700',
+  critical: 'bg-red-500/15 text-red-400 border border-red-500/50 shadow-sm',
+  high: 'bg-orange-500/15 text-orange-400 border border-orange-500/50 shadow-sm',
+  open: 'bg-cyan-500/15 text-cyan-400 border border-cyan-500/50',
+  done: 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/50',
+  low: 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/40',
+  medium: 'bg-amber-500/15 text-amber-400 border border-amber-500/50',
+  error: 'bg-red-500/15 text-red-400 border border-red-500/40',
 }
 
 export default function Badge({ variant, children, className = '' }: BadgeProps) {
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${VARIANTS[variant]} ${className}`}>
+    <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-semibold tracking-wide ${VARIANTS[variant]} ${className}`}>
       {children}
     </span>
   )

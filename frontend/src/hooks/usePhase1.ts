@@ -6,12 +6,15 @@ import type { Phase1Result } from '../types/agent'
 export function usePhase1() {
   const { setPhase1Result, setError, writeToTerminal, setMode } = useWorkbenchStore()
 
-  const run = useCallback(async (ticketId: number, technicianId = 'default') => {
-    writeToTerminal('\r\n\x1b[36m[HERMITS] Starting Phase 1 analysis...\x1b[0m\r\n', 'system')
+  const run = useCallback(async (ticketId: number, forceRefresh = false, technicianId = 'default') => {
+    const refreshLabel = forceRefresh ? ' \x1b[33m(force-refresh)\x1b[0m' : ''
+    writeToTerminal(`\r\n\x1b[36m[HERMITS] Starting Phase 1 analysis...${refreshLabel}\x1b[0m\r\n`, 'system')
+
+    let succeeded = false
 
     try {
       // Try SSE streaming first
-      const { job_id } = await startPhase1(ticketId, technicianId)
+      const { job_id } = await startPhase1(ticketId, technicianId, forceRefresh)
       const es = streamPhase1Status(job_id)
 
       await new Promise<void>((resolve, reject) => {
@@ -41,13 +44,15 @@ export function usePhase1() {
           reject(new Error(`SSE error: ${JSON.stringify(e)}`))
         })
       })
+      succeeded = true
     } catch {
       // SSE not available — fall back to direct POST
       writeToTerminal('\x1b[36m[HERMITS] Running Phase 1 (direct)...\x1b[0m\r\n', 'system')
       try {
-        const result = await runPhase1Direct(ticketId, technicianId)
+        const result = await runPhase1Direct(ticketId, technicianId, forceRefresh)
         setPhase1Result(result)
         writeToTerminal('\x1b[32m[HERMITS] Phase 1 complete.\x1b[0m\r\n', 'success')
+        succeeded = true
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
         setError(`Phase 1 failed: ${msg}`)
@@ -55,7 +60,7 @@ export function usePhase1() {
       }
     }
 
-    setMode('recon_loading')
+    if (succeeded) setMode('recon_loading')
   }, [setPhase1Result, setError, writeToTerminal, setMode])
 
   return { run }

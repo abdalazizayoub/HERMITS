@@ -1,49 +1,61 @@
 import type { MonthlyDigestResult } from '../../types/digest'
-import { Ticket, Clock, AlertCircle, TrendingUp } from 'lucide-react'
+import { TicketCheck, Clock, AlertCircle, TrendingUp } from 'lucide-react'
 
 export default function StatsCards({ data }: { data: MonthlyDigestResult }) {
   const cards = [
     {
       label: 'Tickets Resolved',
-      value: data.total_tickets,
-      icon: Ticket,
-      color: 'text-blue-400',
-      bg: 'bg-blue-950/30 border-blue-800/50',
+      value: String(data.total_tickets),
+      icon: TicketCheck,
+      color: 'text-cyan-400',
+      border: 'rgba(34,211,238,0.25)',
+      bg: 'rgba(34,211,238,0.06)',
+      glow: 'drop-shadow(0 0 6px #22d3ee)',
     },
     {
       label: 'Avg Resolution',
       value: `${data.avg_resolution_minutes.toFixed(0)} min`,
       icon: Clock,
       color: 'text-emerald-400',
-      bg: 'bg-emerald-950/30 border-emerald-800/50',
+      border: 'rgba(52,211,153,0.25)',
+      bg: 'rgba(52,211,153,0.06)',
+      glow: 'drop-shadow(0 0 6px #34d399)',
     },
     {
-      label: 'Most Common Root Cause',
+      label: 'Top Root Cause',
       value: data.most_common_root_cause,
       icon: AlertCircle,
       color: 'text-amber-400',
-      bg: 'bg-amber-950/30 border-amber-800/50',
-      truncate: true,
+      border: 'rgba(251,191,36,0.25)',
+      bg: 'rgba(251,191,36,0.06)',
+      glow: 'drop-shadow(0 0 6px #fbbf24)',
+      small: true,
     },
     {
-      label: 'Top Incidents',
-      value: data.top_incidents.length,
+      label: 'Incidents Tracked',
+      value: String(data.top_incidents.length),
       icon: TrendingUp,
       color: 'text-purple-400',
-      bg: 'bg-purple-950/30 border-purple-800/50',
+      border: 'rgba(167,139,250,0.25)',
+      bg: 'rgba(167,139,250,0.06)',
+      glow: 'drop-shadow(0 0 6px #a78bfa)',
     },
   ]
 
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-      {cards.map(({ label, value, icon: Icon, color, bg, truncate }) => (
-        <div key={label} className={`rounded-xl border p-4 ${bg}`}>
+      {cards.map(({ label, value, icon: Icon, color, border, bg, glow, small }) => (
+        <div
+          key={label}
+          className="rounded-xl border p-4"
+          style={{ borderColor: border, background: bg }}
+        >
           <div className="flex items-center gap-2 mb-2">
-            <Icon size={14} className={color} />
-            <span className="text-xs text-slate-400">{label}</span>
+            <Icon size={14} className={color} style={{ filter: glow }} />
+            <span className="text-xs text-slate-500 leading-tight">{label}</span>
           </div>
-          <p className={`text-lg font-bold ${color} ${truncate ? 'text-sm font-medium leading-snug' : ''}`}>
-            {String(value)}
+          <p className={`font-bold ${color} ${small ? 'text-xs leading-snug' : 'text-2xl'}`}>
+            {value}
           </p>
         </div>
       ))}

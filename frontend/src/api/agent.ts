@@ -12,7 +12,7 @@ export interface ExecuteResult {
   stderr: string
   exit_code: number
   blocked: boolean
-  block_reason?: string
+  reason?: string
   warnings?: string[]
 }
 
