@@ -30,11 +30,11 @@ export default function AnalysisModal({ onClose }: AnalysisModalProps) {
 
   useEffect(() => {
     fetch(selectedMonth)
-  }, [selectedMonth])
+  }, [selectedMonth, fetch])
 
   useEffect(() => {
     return () => cleanup()
-  }, [])
+  }, [cleanup])
 
   // Close on Escape
   useEffect(() => {
