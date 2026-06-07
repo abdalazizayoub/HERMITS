@@ -7,7 +7,7 @@ BLOCKLIST = [
     (re.compile(r"DROP\s+DATABASE"), "destructive database operation"),
     (re.compile(r"truncate\s+/var/log"), "log tampering"),
     (re.compile(r"history\s+-c"), "clearing command history"),
-    (re.compile(r"chown\s+-R\s+[\w\-]+\s+(/etc|/var|/srv|/home)"), "changing ownership of critical directories"),
+    (re.compile(r"chown\s+-R\s+[\w\-:]+\s+(/etc|/var/log|/var/lib|/var/run|/home\b)"), "changing ownership of critical directories"),
 ]
 
 WARN_LIST = [

@@ -85,6 +85,16 @@ class ERPDrafter:
 
         data = self.client.generate_json(system_prompt, user_message)
 
+        # Gemini sometimes returns list-typed values when the schema says "list of …".
+        # Coerce every field to str before doing anything else.
+        for field in ("summary", "root_cause", "actions_taken",
+                      "commands_summary", "validation_result"):
+            val = data.get(field, "")
+            if isinstance(val, list):
+                data[field] = "\n".join(str(item) for item in val)
+            elif not isinstance(val, str):
+                data[field] = str(val) if val is not None else ""
+
         # Scrub secrets from commands_summary even if Gemini missed it
         data["commands_summary"] = _scrub_secrets(data.get("commands_summary", ""))
 

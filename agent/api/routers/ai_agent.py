@@ -44,6 +44,7 @@ class Phase2Request(BaseModel):
     technician_id: str = "default"
     recon_output: Optional[dict] = None
     pillar_baseline: Optional[PillarResult] = None
+    failure_context: Optional[str] = None
 
 
 class CompleteRequest(BaseModel):
@@ -85,9 +86,12 @@ async def run_phase1(req: Phase1Request):
         spec = result.pillar_spec
         service_state_out = functional_impact_out = durability_out = ""
         if spec:
-            svc = await run_command(host, port, username, key_path, spec.service_state_cmd)
-            func = await run_command(host, port, username, key_path, spec.functional_impact_cmd)
-            dur = await run_command(host, port, username, key_path, spec.durability_cmd)
+            import asyncio
+            svc, func, dur = await asyncio.gather(
+                run_command(host, port, username, key_path, spec.service_state_cmd),
+                run_command(host, port, username, key_path, spec.functional_impact_cmd),
+                run_command(host, port, username, key_path, spec.durability_cmd),
+            )
             service_state_out = svc.get("stdout", "") or svc.get("stderr", "")
             functional_impact_out = func.get("stdout", "") or func.get("stderr", "")
             durability_out = dur.get("stdout", "") or dur.get("stderr", "")
@@ -101,6 +105,7 @@ async def run_phase1(req: Phase1Request):
         _phase1_store[req.ticket_id] = {
             "phase1_result": result,
             "pillar_baseline": pillar_baseline,
+            "ticket": ticket,  # cached so phase2 never needs to re-fetch from ERP
         }
 
         return {**result.model_dump(), "pillar_baseline": pillar_baseline.model_dump()}
@@ -139,7 +144,13 @@ async def run_phase2(req: Phase2Request):
             recon_output = {}
 
     try:
-        ticket = await fetch_ticket_from_erp(req.ticket_id)
+        # Use cached ticket from phase1 — avoids a second ERP round-trip that can fail
+        cached_ticket = stored.get("ticket")
+        if cached_ticket is not None:
+            ticket = cached_ticket
+        else:
+            ticket = await fetch_ticket_from_erp(req.ticket_id)
+
         agent = get_agent()
         result = agent.run_ticket_phase2(
             ticket=ticket,
@@ -147,6 +158,7 @@ async def run_phase2(req: Phase2Request):
             pillar_baseline_results=pillar_baseline,
             technician_id=req.technician_id,
             phase1_result=phase1,
+            failure_context=req.failure_context or "",
         )
         return result
     except Exception as e:

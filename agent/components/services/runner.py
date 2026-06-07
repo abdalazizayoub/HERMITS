@@ -110,6 +110,7 @@ class HermitsAgent:
         pillar_baseline_results: PillarResult,
         technician_id: str,
         phase1_result: Phase1Result,
+        failure_context: str = "",
     ) -> AgentRunResult:
         """
         Called after Person A returns recon data and pillar baseline.
@@ -126,6 +127,7 @@ class HermitsAgent:
             pillar_baseline=pillar_baseline_results,
             kb_matches=kb_matches,
             memory_context=memory_context,
+            failure_context=failure_context,
         )
 
         best_hypothesis_result.hypothesis.fix_steps = self.trust.reorder_fix_steps(

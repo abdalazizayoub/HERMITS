@@ -9,10 +9,22 @@ ROOT_DIR = os.path.abspath(
 KEY_DIR = os.environ.get("SSH_KEY_DIR", os.path.join(ROOT_DIR, "keys"))
 DEFAULT_USER = os.environ.get("SSH_USERNAME", "azureuser")
 TIMEOUT = int(os.environ.get("SSH_TIMEOUT", "30"))
+COMMAND_TIMEOUT = int(os.environ.get("SSH_COMMAND_TIMEOUT", "60"))
+VALIDATION_TIMEOUT = int(os.environ.get("SSH_VALIDATION_TIMEOUT", "300"))
 
 def get_key_path(ticket_id: int) -> str:
     key_id = ticket_id % 10
     return os.path.join(KEY_DIR, f"case{key_id}_key.pem")
+
+async def _run_one(conn: asyncssh.SSHClientConnection, name: str, cmd: str, timeout: int) -> tuple[str, str]:
+    try:
+        result = await asyncio.wait_for(conn.run(cmd), timeout=timeout)
+        return name, result.stdout.strip()
+    except asyncio.TimeoutError:
+        return name, "TIMEOUT"
+    except Exception as e:
+        return name, f"ERROR: {str(e)}"
+
 
 async def run_recon(host: str, port: int, username: str, key_path: str) -> dict[str, str]:
     READ_ONLY = {
@@ -27,49 +39,70 @@ async def run_recon(host: str, port: int, username: str, key_path: str) -> dict[
         "timers":       "systemctl list-timers --no-pager",
         "cron":         "cat /etc/crontab",
         "last_logins":  "last -n 10",
-        "service_files": "find /etc/systemd /lib/systemd -name '*.service' 2>/dev/null | xargs grep -l '8080' 2>/dev/null",
-        "opt_files":     "ls /opt/hackathon/ 2>/dev/null",
+        "service_files": "find /etc/systemd /lib/systemd -name '*.service' 2>/dev/null | xargs grep -l 'EnvironmentFile\\|ExecStart' 2>/dev/null | head -10",
+        "opt_files":     "ls /opt/ 2>/dev/null",
         "all_services":  "systemctl list-unit-files --type=service --no-pager | grep -v disabled | head -40",
-        "env_files":        "find /etc /opt /srv -name '*.env' -o -name '*.conf' -o -name '*.cfg' 2>/dev/null | grep -v proc | head -20",
-        "env_contents":     "find /etc -name '*.env' 2>/dev/null | xargs cat 2>/dev/null | head -100",
-        "service_env":      "systemctl show customer-status.service 2>/dev/null | grep -i 'environment\|envfile\|execstart' || systemctl list-units --type=service --state=active --no-pager | head -20",
-        "app_configs":      "find /opt /srv /app -name '*.env' -o -name 'config.*' -o -name '*.cfg' -o -name '*.ini' 2>/dev/null | xargs cat 2>/dev/null | head -100",
-        "listening_ports":  "ss -tulpn 2>/dev/null",
-        "service_env_files":"systemctl cat customer-status.service 2>/dev/null || find /etc/systemd -name '*.service' 2>/dev/null | xargs grep -l 'EnvironmentFile' 2>/dev/null | xargs cat 2>/dev/null",
-        "port_mismatch":    "ss -tulpn | awk '{print $5}' | grep -oP ':\\K[0-9]+' | sort -u",
-        "upload_dirs":      "find /var/www /opt /srv -type d \\( -name 'upload*' -o -name 'document*' \\) 2>/dev/null | xargs ls -la 2>/dev/null | head -20",
-        "service_users":    "find /etc/systemd/system -name '*.service' | xargs grep -i 'user=' 2>/dev/null",
-        "hosts_file":       "cat /etc/hosts",
-        "dns_resolution":   "getent hosts partner-api.internal 2>/dev/null || echo 'not resolved'",
-        "firewall":         "sudo ufw status 2>/dev/null || sudo iptables -L -n 2>/dev/null | head -20",
-        "pg_users":         "sudo -u postgres psql -c '\\du' 2>/dev/null || echo 'pg not accessible'",
-        "pg_tables":        "sudo -u postgres psql -c '\\dt' 2>/dev/null || echo 'no tables'",
-        "pg_grants":        "sudo -u postgres psql -c '\\dp' 2>/dev/null || echo 'no grants'",
-        "collector_status": "systemctl status --no-pager $(systemctl list-units --type=service --state=active | grep -i 'collect\\|monitor\\|metric\\|agent' | awk '{print $1}') 2>/dev/null | head -30",
+        # env / config files — generalised, no hardcoded service name
+        "env_files":           "find /etc /opt /srv -name '*.env' -o -name '*.conf' -o -name '*.cfg' 2>/dev/null | grep -v proc | head -20",
+        "env_contents":        "find /etc -name '*.env' 2>/dev/null | xargs cat 2>/dev/null | head -100",
+        "app_configs":         "find /opt /srv /app -name '*.env' -o -name 'config.*' -o -name '*.cfg' -o -name '*.ini' 2>/dev/null | xargs cat 2>/dev/null | head -100",
+        # read every service unit that declares an EnvironmentFile — no hardcoded name
+        "service_env_files":   "find /etc/systemd -name '*.service' 2>/dev/null | xargs grep -l 'EnvironmentFile' 2>/dev/null | xargs systemctl cat 2>/dev/null | head -150",
+        "all_env_file_values": "find /etc/systemd -name '*.service' 2>/dev/null | xargs grep -h 'EnvironmentFile' 2>/dev/null | awk '{print $NF}' | sort -u | xargs cat 2>/dev/null | head -100",
+        # port / network
+        "listening_ports":     "ss -tulpn 2>/dev/null",
+        "port_mismatch":       "ss -tulpn 2>/dev/null | awk '{print $5}' | grep -oP ':\\K[0-9]+' | sort -un",
+        # permissions — find actual upload/document directories and their owner
+        "upload_dirs":         "find /var/www /opt /srv /home -type d \\( -name 'upload*' -o -name 'document*' -o -name 'media' -o -name 'files' \\) 2>/dev/null | xargs ls -la 2>/dev/null | head -30",
+        "service_users":       "find /etc/systemd/system -name '*.service' 2>/dev/null | xargs grep -i 'user=\\|group=' 2>/dev/null",
+        # read application source for hardcoded paths / constants
+        "app_source":          "find /opt /srv /var/www -maxdepth 5 \\( -name 'app.py' -o -name 'main.py' -o -name 'server.py' -o -name 'config.py' -o -name 'settings.py' \\) 2>/dev/null | head -3 | xargs cat 2>/dev/null | head -200",
+        "upload_config":       "find /opt /srv /var/www -maxdepth 5 \\( -name 'app.py' -o -name 'main.py' -o -name 'server.py' -o -name 'config.py' -o -name 'settings.py' \\) 2>/dev/null | head -3 | xargs grep -in 'upload\\|UPLOAD\\|document\\|path\\|folder\\|directory\\|PORT\\|BIND' 2>/dev/null | head -50",
+        # DNS / network reachability
+        "hosts_file":          "cat /etc/hosts",
+        "dns_resolution":      "cat /etc/hosts && echo '---' && grep -rh 'host\\|HOST\\|endpoint\\|ENDPOINT\\|url\\|URL' /opt /srv /var/www /etc --include='*.env' --include='*.cfg' --include='*.ini' 2>/dev/null | grep -v '#' | head -20",
+        "firewall":            "sudo -n ufw status 2>/dev/null || sudo -n iptables -L -n 2>/dev/null | head -20",
+        # postgres — roles, table grants, and sequence grants (INSERT needs sequences too)
+        "pg_users":            "sudo -n -u postgres psql -c '\\du' 2>/dev/null || echo 'pg not accessible'",
+        "pg_grants":           "sudo -n -u postgres psql -c \"SELECT grantee, table_name, string_agg(privilege_type, ', ') FROM information_schema.role_table_grants WHERE table_schema='public' GROUP BY grantee, table_name ORDER BY table_name;\" 2>/dev/null || echo 'no grants'",
+        "pg_seq_grants":       "sudo -n -u postgres psql -c \"SELECT relname AS sequence, relacl FROM pg_class WHERE relkind='S' ORDER BY relname;\" 2>/dev/null || echo 'no seq info'",
+        "pg_databases":        "sudo -n -u postgres psql -c '\\l' 2>/dev/null || echo 'no db list'",
+        # monitoring / collector — check ALL states, not just active
+        "collector_status":    "systemctl list-unit-files --type=service 2>/dev/null | grep -iE 'collect|monitor|metric|agent|telegraf|prometheus|fluentd|filebeat|log' | head -10",
+        "collector_detail":    "systemctl list-units --type=service --all --no-pager 2>/dev/null | grep -iE 'collect|monitor|metric|agent|telegraf|prometheus|fluentd|filebeat|log' | head -10",
     }
-    results = {}
-    try:
-        async with asyncssh.connect(
-            host,
-            port=port,
-            username=username,
-            client_keys=[key_path],
-            known_hosts=None
-        ) as conn:
-            for name, cmd in READ_ONLY.items():
-                try:
-                    result = await asyncio.wait_for(
-                        conn.run(cmd),
-                        timeout=TIMEOUT
+    # OpenSSH default MaxSessions is 10; batch to stay safely under the limit
+    _BATCH = 8
+    # Retry connect up to 3 times with backoff — the VM may be briefly unreachable
+    # after a service restart or the pillar baseline triggered a reboot check.
+    _CONNECT_ATTEMPTS = 3
+    _CONNECT_RETRY_DELAY = 20  # seconds between attempts
+
+    for attempt in range(_CONNECT_ATTEMPTS):
+        try:
+            async with asyncssh.connect(
+                host,
+                port=port,
+                username=username,
+                client_keys=[key_path],
+                known_hosts=None,
+                connect_timeout=15,
+            ) as conn:
+                items = list(READ_ONLY.items())
+                results: dict[str, str] = {}
+                for i in range(0, len(items), _BATCH):
+                    batch = items[i : i + _BATCH]
+                    pairs = await asyncio.gather(
+                        *[_run_one(conn, name, cmd, TIMEOUT) for name, cmd in batch]
                     )
-                    results[name] = result.stdout.strip()
-                except asyncio.TimeoutError:
-                    results[name] = "TIMEOUT"
-                except Exception as e:
-                    results[name] = f"ERROR: {str(e)}"
-    except asyncssh.Error as conn_err:
-        return {"error": f"Connection failed: {str(conn_err)}"}
-    return results
+                    results.update(pairs)
+                return results
+        except (asyncssh.Error, OSError, Exception) as conn_err:
+            if attempt < _CONNECT_ATTEMPTS - 1:
+                await asyncio.sleep(_CONNECT_RETRY_DELAY)
+            else:
+                return {"error": f"Connection failed after {_CONNECT_ATTEMPTS} attempts: {str(conn_err)}"}
+    return {"error": "Recon failed: unreachable after all retries"}
 
 async def run_command(host: str, port: int, username: str, key_path: str, command: str) -> dict:
     is_safe, reason, warnings = safety_check(command=command)
@@ -88,17 +121,25 @@ async def run_command(host: str, port: int, username: str, key_path: str, comman
         command = command.replace("systemctl start ", "systemctl start --no-block ")
     if "systemctl restart " in command and "--no-block" not in command:
         command = command.replace("systemctl restart ", "systemctl restart --no-block ")
+    if command.startswith("sudo ") and not command.startswith("sudo -n "):
+        command = command.replace("sudo ", "sudo -n ", 1)
+    # public-test.sh is a slow integration test; give it more time
+    cmd_timeout = 120 if "public-test.sh" in command else COMMAND_TIMEOUT
     try:
         async with asyncssh.connect(
             host,
             port=port,
             username=username,
             client_keys=[key_path],
-            known_hosts=None
+            known_hosts=None,
+            connect_timeout=30,
         ) as conn:
+            # sudo needs a PTY on Ubuntu VMs (PAM/requiretty); other commands must NOT
+            # use a PTY because `xargs grep` with no input reads from PTY stdin and hangs.
+            use_pty = "sudo" in command
             result = await asyncio.wait_for(
-                conn.run(command),
-                timeout=TIMEOUT
+                conn.run(command, request_pty=use_pty),
+                timeout=cmd_timeout
             )
             return {
                 "blocked": False,
@@ -114,8 +155,18 @@ async def run_command(host: str, port: int, username: str, key_path: str, comman
             "blocked": False,
             "reason": reason,
             "stdout": "",
-            "stderr": "Command timed out",
-            "exit_code": None,
+            "stderr": f"Command timed out after {cmd_timeout}s",
+            "exit_code": 124,
+            "warnings": warnings,
+            "ok": False,
+        }
+    except (asyncssh.DisconnectError, ConnectionResetError) as disc_err:
+        return {
+            "blocked": False,
+            "reason": reason,
+            "stdout": "",
+            "stderr": f"SSH connection dropped: {str(disc_err)}",
+            "exit_code": 255,
             "warnings": warnings,
             "ok": False,
         }
@@ -124,25 +175,36 @@ async def run_command(host: str, port: int, username: str, key_path: str, comman
             "blocked": False,
             "reason": reason,
             "stdout": "",
-            "stderr": f"Connection failed: {str(conn_err)}",
-            "exit_code": None,
+            "stderr": f"SSH error: {str(conn_err)}",
+            "exit_code": 255,
+            "warnings": warnings,
+            "ok": False,
+        }
+    except Exception as exc:
+        return {
+            "blocked": False,
+            "reason": reason,
+            "stdout": "",
+            "stderr": f"Unexpected error: {str(exc)}",
+            "exit_code": 255,
             "warnings": warnings,
             "ok": False,
         }
     
 async def run_validation(host: str, port: int, username: str, key_path: str) -> dict:
-    command = "sudo /opt/hackathon/public-test.sh"
+    command = "sudo -n /opt/hackathon/public-test.sh"
     try:
         async with asyncssh.connect(
             host,
             port=port,
             username=username,
             client_keys=[key_path],
-            known_hosts=None
+            known_hosts=None,
+            connect_timeout=15,
         ) as conn:
             result = await asyncio.wait_for(
                 conn.run(command),
-                timeout=TIMEOUT
+                timeout=VALIDATION_TIMEOUT
             )
             return {
                 "passed": result.exit_status == 0,
