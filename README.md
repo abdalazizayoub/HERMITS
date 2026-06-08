@@ -16,7 +16,6 @@ The system is designed around a human-in-the-loop process:
 - `server.py` — unified FastAPI backend combining infrastructure and AI agent routes.
 - `docker-compose.yml` — runs the API server and the static technician UI.
 - `ui.html` — built-in static dashboard served by nginx.
-- `frontend/` — optional React/Vite dashboard source for local frontend development.
 - `hermits_cli.py` — interactive end-to-end incident response CLI.
 - `backend/` — ERP, SSH, activity submission, and audit infrastructure.
 - `agent/` — AI workflows, Gemini integration, KB matching, and voice summarization.
@@ -40,7 +39,6 @@ The system is designed around a human-in-the-loop process:
 
 - Python 3.11+ (or compatible Python 3.x)
 - Docker and Docker Compose
-- Optional: Node.js 18+ for `frontend/` development
 - Valid AI credentials for Gemini and ElevenLabs for full agent/voice behavior
 
 ## Setup
@@ -106,21 +104,8 @@ http://localhost:5173
 
 If you do not use Docker Compose, serve `ui.html` from a local web server and point it at the API.
 
-## Frontend development
 
-The `frontend/` folder contains a React + Vite dashboard. To develop locally:
 
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-Build for production:
-
-```bash
-npm run build
-```
 
 ## CLI usage
 
@@ -151,7 +136,6 @@ The AI and voice components are mocked in tests, so no API keys are required.
 - `keys/` — SSH key material for ticket VMs.
 - `data/` — knowledge base and memory context storage.
 - `audit_logs/` — audit trail JSONL files.
-- `frontend/` — optional React dashboard source.
 
 ## Notes
 
